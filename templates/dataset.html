@@ -9,6 +9,7 @@
         细胞数量、基因数量、元信息字段和可用于检索的向量来源。
     </p>
 
+    <!-- 消息提示 -->
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -19,6 +20,7 @@
         {% endif %}
     {% endwith %}
 
+    <!-- 上传 h5ad 文件 -->
     <form method="post" enctype="multipart/form-data">
         <label>上传 h5ad 数据文件：</label>
         <input type="file" name="file" accept=".h5ad">
@@ -28,6 +30,8 @@
     <hr>
 
     {% if dataset_info %}
+
+        <!-- 数据集基本信息 -->
         <h3>数据集基本信息</h3>
 
         <table>
@@ -61,22 +65,102 @@
             </tr>
             <tr>
                 <td>obs 字段</td>
-                <td>{{ dataset_info.obs_columns | join(", ") }}</td>
+                <td>
+                    {% if dataset_info.obs_columns %}
+                        {{ dataset_info.obs_columns | join(", ") }}
+                    {% else %}
+                        无
+                    {% endif %}
+                </td>
             </tr>
             <tr>
                 <td>var 字段</td>
-                <td>{{ dataset_info.var_columns | join(", ") }}</td>
+                <td>
+                    {% if dataset_info.var_columns %}
+                        {{ dataset_info.var_columns | join(", ") }}
+                    {% else %}
+                        无
+                    {% endif %}
+                </td>
             </tr>
             <tr>
                 <td>obsm 字段</td>
-                <td>{{ dataset_info.obsm_keys | join(", ") }}</td>
+                <td>
+                    {% if dataset_info.obsm_keys %}
+                        {{ dataset_info.obsm_keys | join(", ") }}
+                    {% else %}
+                        无
+                    {% endif %}
+                </td>
             </tr>
             <tr>
                 <td>layers 字段</td>
-                <td>{{ dataset_info.layer_keys | join(", ") }}</td>
+                <td>
+                    {% if dataset_info.layer_keys %}
+                        {{ dataset_info.layer_keys | join(", ") }}
+                    {% else %}
+                        无
+                    {% endif %}
+                </td>
             </tr>
         </table>
 
+        <!-- 提取向量按钮 -->
+        <div style="margin-top: 20px;">
+            <form method="post" action="{{ url_for('extract_vectors') }}">
+                <button type="submit">提取并保存细胞向量</button>
+            </form>
+        </div>
+
+        <!-- 向量文件信息 -->
+        {% if vector_info %}
+            <h3>向量文件信息</h3>
+
+            <table>
+                <tr>
+                    <th>字段</th>
+                    <th>内容</th>
+                </tr>
+                <tr>
+                    <td>数据集名称</td>
+                    <td>{{ vector_info.dataset_name }}</td>
+                </tr>
+                <tr>
+                    <td>向量来源</td>
+                    <td>{{ vector_info.vector_source }}</td>
+                </tr>
+                <tr>
+                    <td>细胞数量</td>
+                    <td>{{ vector_info.cell_count }}</td>
+                </tr>
+                <tr>
+                    <td>向量维度</td>
+                    <td>{{ vector_info.vector_dim }}</td>
+                </tr>
+                <tr>
+                    <td>数据类型</td>
+                    <td>{{ vector_info.dtype }}</td>
+                </tr>
+                <tr>
+                    <td>保存目录</td>
+                    <td>{{ vector_info.save_dir }}</td>
+                </tr>
+                <tr>
+                    <td>vectors.npy</td>
+                    <td>{{ vector_info.vectors_path }}</td>
+                </tr>
+                <tr>
+                    <td>cell_ids.json</td>
+                    <td>{{ vector_info.cell_ids_path }}</td>
+                </tr>
+                <tr>
+                    <td>metadata.csv</td>
+                    <td>{{ vector_info.metadata_path }}</td>
+                </tr>
+            </table>
+        {% endif %}
+
+        <!-- 细胞元信息预览 -->
         <h3>细胞元信息预览</h3>
 
         {% if dataset_info.obs_preview %}
@@ -100,7 +184,10 @@
         {% endif %}
 
     {% else %}
+
+        <!-- 未上传数据时的默认显示 -->
         <h3>数据集信息</h3>
+
         <table>
             <tr>
                 <th>数据集名称</th>
@@ -117,6 +204,7 @@
                 <td>未上传</td>
             </tr>
         </table>
+
     {% endif %}
 </div>
 {% endblock %}
