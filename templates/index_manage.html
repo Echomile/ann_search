@@ -4,25 +4,146 @@
 <div class="card">
     <h2>索引管理</h2>
 
-    <form>
-        <label>选择索引类型：</label>
-        <select name="index_type">
-            <option value="hnsw">HNSW</option>
-            <option value="brute_force">精确检索</option>
-        </select>
+    <p>
+        本模块用于基于已经提取的细胞向量文件 vectors.npy 构建 HNSW 近似最近邻检索索引。
+        构建完成后，系统会将索引文件保存到 indexes 目录，供后续 Top-K 相似细胞检索使用。
+    </p>
 
+    <!-- 消息提示 -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert {{ category }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <h3>当前向量文件状态</h3>
+
+    {% if vector_info %}
+        <table>
+            <tr>
+                <th>字段</th>
+                <th>内容</th>
+            </tr>
+            <tr>
+                <td>数据集名称</td>
+                <td>{{ vector_info.dataset_name }}</td>
+            </tr>
+            <tr>
+                <td>向量来源</td>
+                <td>{{ vector_info.vector_source }}</td>
+            </tr>
+            <tr>
+                <td>细胞数量</td>
+                <td>{{ vector_info.cell_count }}</td>
+            </tr>
+            <tr>
+                <td>向量维度</td>
+                <td>{{ vector_info.vector_dim }}</td>
+            </tr>
+            <tr>
+                <td>vectors.npy</td>
+                <td>{{ vector_info.vectors_path }}</td>
+            </tr>
+        </table>
+    {% else %}
+        <p class="warning-text">
+            当前还没有可用的向量文件。请先进入“数据集管理”页面，上传 h5ad 文件并提取细胞向量。
+        </p>
+    {% endif %}
+
+    <hr>
+
+    <h3>构建 HNSW 索引</h3>
+
+    <form method="post" action="{{ url_for('index_manage') }}">
         <label>距离度量：</label>
         <select name="metric">
-            <option value="l2">欧氏距离</option>
-            <option value="cosine">余弦距离</option>
+            <option value="l2">欧氏距离 l2</option>
+            <option value="cosine">余弦距离 cosine</option>
+            <option value="ip">内积 ip</option>
         </select>
 
-        <button type="button">构建索引</button>
+        <br><br>
+
+        <label>M：</label>
+        <input type="number" name="M" value="16" min="4" max="128">
+
+        <label>ef_construction：</label>
+        <input type="number" name="ef_construction" value="200" min="50" max="1000">
+
+        <label>ef_search：</label>
+        <input type="number" name="ef_search" value="50" min="10" max="1000">
+
+        <br><br>
+
+        <button type="submit">构建 HNSW 索引</button>
     </form>
 
     <hr>
 
-    <h3>索引状态</h3>
-    <p>当前状态：未构建索引</p>
+    <h3>当前索引状态</h3>
+
+    {% if index_info %}
+        <table>
+            <tr>
+                <th>字段</th>
+                <th>内容</th>
+            </tr>
+            <tr>
+                <td>索引状态</td>
+                <td>{{ index_info.status }}</td>
+            </tr>
+            <tr>
+                <td>数据集名称</td>
+                <td>{{ index_info.dataset_name }}</td>
+            </tr>
+            <tr>
+                <td>索引类型</td>
+                <td>{{ index_info.index_type }}</td>
+            </tr>
+            <tr>
+                <td>距离度量</td>
+                <td>{{ index_info.metric }}</td>
+            </tr>
+            <tr>
+                <td>细胞数量</td>
+                <td>{{ index_info.cell_count }}</td>
+            </tr>
+            <tr>
+                <td>向量维度</td>
+                <td>{{ index_info.vector_dim }}</td>
+            </tr>
+            <tr>
+                <td>M</td>
+                <td>{{ index_info.M }}</td>
+            </tr>
+            <tr>
+                <td>ef_construction</td>
+                <td>{{ index_info.ef_construction }}</td>
+            </tr>
+            <tr>
+                <td>ef_search</td>
+                <td>{{ index_info.ef_search }}</td>
+            </tr>
+            <tr>
+                <td>构建耗时</td>
+                <td>{{ index_info.build_time_seconds }} 秒</td>
+            </tr>
+            <tr>
+                <td>构建时间</td>
+                <td>{{ index_info.created_time }}</td>
+            </tr>
+            <tr>
+                <td>索引文件路径</td>
+                <td>{{ index_info.index_path }}</td>
+            </tr>
+        </table>
+    {% else %}
+        <p>当前还没有构建 HNSW 索引。</p>
+    {% endif %}
 </div>
 {% endblock %}
