@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code
+.vscode/
+
+# virtual environment
+venv/
+.venv/
+py313/
+env/
+
+# Flask
+instance/
+*.log
+
+# large data files
+*.h5ad
+*.h5
+*.loom
+*.npy
+*.npz
+*.csv
+
+# project data
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# ANN indexes
+indexes/*
+!indexes/.gitkeep
+
+# system files
+.DS_Store
+Thumbs.db

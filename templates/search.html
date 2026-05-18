@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="card">
+    <h2>相似细胞检索</h2>
+
+    <form>
+        <label>查询细胞编号：</label>
+        <input type="text" name="cell_id" placeholder="例如：cell_001">
+
+        <label>Top-K：</label>
+        <input type="number" name="top_k" value="10">
+
+        <button type="button">开始检索</button>
+    </form>
+
+    <hr>
+
+    <h3>检索结果</h3>
+    <table>
+        <tr>
+            <th>排名</th>
+            <th>细胞编号</th>
+            <th>距离</th>
+            <th>细胞类型</th>
+            <th>样本信息</th>
+        </tr>
+        <tr>
+            <td colspan="5">暂无检索结果</td>
+        </tr>
+    </table>
+</div>
+{% endblock %}

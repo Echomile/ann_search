@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>单细胞 ANN 检索系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div class="navbar">
+    <div class="logo">单细胞 ANN 检索系统</div>
+    <div class="nav-links">
+        <a href="/">首页</a>
+        <a href="/dataset">数据集管理</a>
+        <a href="/index_manage">索引管理</a>
+        <a href="/search">相似细胞检索</a>
+    </div>
+</div>
+
+<div class="container">
+    {% block content %}{% endblock %}
+</div>
+
+</body>
+</html>
