@@ -3,6 +3,8 @@ from config import Config
 from services.data_service import save_uploaded_file, read_h5ad_info, load_current_dataset_info
 from services.preprocess_service import extract_and_save_vectors, load_current_vector_info
 from services.ann_service import build_hnsw_index, load_current_index_info
+from services.search_service import search_similar_cells_by_id
+from services.ann_service import build_hnsw_index
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -106,9 +108,41 @@ def index_manage():
     )
 
 
-@app.route("/search")
+@app.route("/search", methods=["GET", "POST"])
 def search():
-    return render_template("search.html")
+    vector_info = load_current_vector_info()
+    index_info = load_current_index_info()
+    search_result = None
+
+    if request.method == "POST":
+        try:
+            if vector_info is None:
+                flash("请先上传 h5ad 文件并提取细胞向量。", "error")
+                return redirect(url_for("search"))
+
+            if index_info is None:
+                flash("请先构建 HNSW 索引，再进行相似细胞检索。", "error")
+                return redirect(url_for("search"))
+
+            query_cell_id = request.form.get("cell_id", "").strip()
+            top_k = request.form.get("top_k", 10)
+
+            search_result = search_similar_cells_by_id(
+                query_cell_id=query_cell_id,
+                top_k=top_k
+            )
+
+            flash("相似细胞检索成功！", "success")
+
+        except Exception as e:
+            flash(f"相似细胞检索失败：{str(e)}", "error")
+
+    return render_template(
+        "search.html",
+        vector_info=vector_info,
+        index_info=index_info,
+        search_result=search_result
+    )
 
 
 @app.route("/evaluate")
