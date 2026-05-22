@@ -5,10 +5,10 @@
 """
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -58,10 +58,21 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = ""
 
-    CORS_ORIGINS: list[str] = [
+    CORS_ORIGINS: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
         "http://localhost:3000",
     ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, v: object) -> object:
+        """允许 ``CORS_ORIGINS`` 用逗号分隔字符串或 JSON 数组两种格式。"""
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                return stripped
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return v
 
 
 @lru_cache(maxsize=1)
