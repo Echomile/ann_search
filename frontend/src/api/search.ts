@@ -1,10 +1,25 @@
 import { httpClient } from './client';
-import type { SearchRequest, SearchResponse } from '@/types/search';
+import type {
+  MultiDatasetSearchRequest,
+  SearchByIdRequest,
+  SearchByVectorRequest,
+  SearchResponse,
+} from '@/types/search';
 
-// 检索 API
+// 相似检索 API
 export const searchApi = {
-  query: async (payload: SearchRequest): Promise<SearchResponse> => {
-    const { data } = await httpClient.post<SearchResponse>('/search', payload);
+  byId: async (payload: SearchByIdRequest): Promise<SearchResponse> => {
+    const { data } = await httpClient.post<SearchResponse>('/search/by-id', payload);
+    return data;
+  },
+
+  byVector: async (payload: SearchByVectorRequest): Promise<SearchResponse> => {
+    const { data } = await httpClient.post<SearchResponse>('/search/by-vector', payload);
+    return data;
+  },
+
+  multiDataset: async (payload: MultiDatasetSearchRequest): Promise<SearchResponse> => {
+    const { data } = await httpClient.post<SearchResponse>('/search/multi-dataset', payload);
     return data;
   },
 };

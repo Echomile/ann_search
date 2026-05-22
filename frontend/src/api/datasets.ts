@@ -1,5 +1,16 @@
+import type { AxiosProgressEvent } from 'axios';
 import { httpClient } from './client';
-import type { CreateDatasetRequest, Dataset } from '@/types/dataset';
+import type {
+  Dataset,
+  DatasetDeleteResponse,
+  DatasetStatus,
+  DatasetUploadResponse,
+} from '@/types/dataset';
+
+interface UploadOptions {
+  onUploadProgress?: (event: AxiosProgressEvent) => void;
+  signal?: AbortSignal;
+}
 
 // 数据集管理 API
 export const datasetsApi = {
@@ -13,18 +24,29 @@ export const datasetsApi = {
     return data;
   },
 
-  create: async (payload: CreateDatasetRequest, file: File): Promise<Dataset> => {
+  upload: async (
+    name: string,
+    file: File,
+    options?: UploadOptions,
+  ): Promise<DatasetUploadResponse> => {
     const form = new FormData();
-    form.append('name', payload.name);
-    if (payload.description) form.append('description', payload.description);
+    form.append('name', name);
     form.append('file', file);
-    const { data } = await httpClient.post<Dataset>('/datasets', form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    const { data } = await httpClient.post<DatasetUploadResponse>('/datasets/upload', form, {
+      onUploadProgress: options?.onUploadProgress,
+      signal: options?.signal,
+      timeout: 0,
     });
     return data;
   },
 
-  remove: async (id: number): Promise<void> => {
-    await httpClient.delete(`/datasets/${id}`);
+  remove: async (id: number): Promise<DatasetDeleteResponse> => {
+    const { data } = await httpClient.delete<DatasetDeleteResponse>(`/datasets/${id}`);
+    return data;
+  },
+
+  status: async (id: number): Promise<DatasetStatus> => {
+    const { data } = await httpClient.get<DatasetStatus>(`/datasets/${id}/status`);
+    return data;
   },
 };

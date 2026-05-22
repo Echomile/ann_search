@@ -1,23 +1,26 @@
 import { httpClient } from './client';
-import type { EvaluationMetric } from '@/types/search';
+import type {
+  BenchmarkRequest,
+  BenchmarkResult,
+  BenchmarkSummary,
+  BenchmarkTaskHandle,
+} from '@/types/evaluation';
 
-export interface EvaluationRunRequest {
-  datasetId: number;
-  indexIds: number[];
-  topK: number;
-  numQueries?: number;
-}
-
-// 性能评测 API
+// 索引评测 API
 export const evaluationApi = {
-  run: async (payload: EvaluationRunRequest): Promise<EvaluationMetric[]> => {
-    const { data } = await httpClient.post<EvaluationMetric[]>('/evaluation/run', payload);
+  run: async (payload: BenchmarkRequest): Promise<BenchmarkTaskHandle> => {
+    const { data } = await httpClient.post<BenchmarkTaskHandle>('/evaluation/run', payload);
     return data;
   },
 
-  history: async (datasetId?: number): Promise<EvaluationMetric[]> => {
-    const { data } = await httpClient.get<EvaluationMetric[]>('/evaluation/history', {
-      params: datasetId ? { datasetId } : undefined,
+  latest: async (indexId: number): Promise<BenchmarkResult> => {
+    const { data } = await httpClient.get<BenchmarkResult>(`/evaluation/${indexId}/latest`);
+    return data;
+  },
+
+  list: async (datasetId?: number): Promise<BenchmarkSummary[]> => {
+    const { data } = await httpClient.get<BenchmarkSummary[]>('/evaluation/results', {
+      params: datasetId !== undefined ? { dataset_id: datasetId } : undefined,
     });
     return data;
   },

@@ -1,30 +1,33 @@
 import { httpClient } from './client';
-import type { DistanceMetric, IndexInfo, IndexType } from '@/types/search';
-
-export interface CreateIndexRequest {
-  datasetId: number;
-  name: string;
-  type: IndexType;
-  metric: DistanceMetric;
-  params?: Record<string, number | string>;
-}
+import type {
+  IndexCreateRequest,
+  IndexCreateResponse,
+  IndexRecord,
+  IndexStatus,
+} from '@/types/indexRecord';
 
 // 索引管理 API
 export const indexesApi = {
-  list: async (datasetId?: number): Promise<IndexInfo[]> => {
-    const { data } = await httpClient.get<IndexInfo[]>('/indexes', {
-      params: datasetId ? { datasetId } : undefined,
-    });
+  listByDataset: async (datasetId: number): Promise<IndexRecord[]> => {
+    const { data } = await httpClient.get<IndexRecord[]>(`/datasets/${datasetId}/indexes`);
     return data;
   },
 
-  get: async (id: number): Promise<IndexInfo> => {
-    const { data } = await httpClient.get<IndexInfo>(`/indexes/${id}`);
+  create: async (datasetId: number, payload: IndexCreateRequest): Promise<IndexCreateResponse> => {
+    const { data } = await httpClient.post<IndexCreateResponse>(
+      `/datasets/${datasetId}/indexes`,
+      payload,
+    );
     return data;
   },
 
-  create: async (payload: CreateIndexRequest): Promise<IndexInfo> => {
-    const { data } = await httpClient.post<IndexInfo>('/indexes', payload);
+  get: async (id: number): Promise<IndexRecord> => {
+    const { data } = await httpClient.get<IndexRecord>(`/indexes/${id}`);
+    return data;
+  },
+
+  status: async (id: number): Promise<IndexStatus> => {
+    const { data } = await httpClient.get<IndexStatus>(`/indexes/${id}/status`);
     return data;
   },
 

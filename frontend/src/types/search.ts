@@ -1,47 +1,47 @@
-// 检索相关类型
+// 检索相关类型，命名与后端 Pydantic schema 严格一致
 
-export type IndexType = 'flat' | 'hnsw' | 'ivf' | 'ivfpq' | 'lsh';
-export type DistanceMetric = 'l2' | 'cosine' | 'ip';
+export type SearchFilters = Record<string, string | number | boolean | (string | number)[]>;
 
-export interface IndexInfo {
-  id: number;
-  datasetId: number;
-  name: string;
-  type: IndexType;
-  metric: DistanceMetric;
-  params: Record<string, number | string>;
-  buildTimeMs?: number;
-  sizeBytes?: number;
-  status: 'building' | 'ready' | 'failed';
-  createdAt: string;
+export interface SearchByIdRequest {
+  dataset_id: number;
+  cell_id: string;
+  top_k: number;
+  filters?: SearchFilters | null;
+  index_id?: number | null;
 }
 
-export interface SearchRequest {
-  indexId: number;
-  topK: number;
-  queryCellId?: string;
-  queryVector?: number[];
-  filters?: Record<string, string | string[]>;
+export interface SearchByVectorRequest {
+  dataset_id: number;
+  vector: number[];
+  top_k: number;
+  filters?: SearchFilters | null;
+  index_id?: number | null;
+}
+
+export interface MultiDatasetSearchRequest {
+  dataset_ids: number[];
+  index_ids?: number[] | null;
+  cell_id?: string | null;
+  source_dataset_id?: number | null;
+  vector?: number[] | null;
+  top_k: number;
+  filters?: SearchFilters | null;
 }
 
 export interface SearchHit {
-  cellId: string;
-  distance: number;
   rank: number;
-  metadata?: Record<string, string | number>;
+  cell_id: string;
+  distance: number;
+  meta: Record<string, string | number | boolean | null> | null;
+  source_dataset_id: number | null;
 }
 
 export interface SearchResponse {
+  dataset_id: number | null;
+  top_k: number;
+  latency_ms: number;
+  index_backend: string | null;
+  metric: string | null;
+  total_candidates: number | null;
   hits: SearchHit[];
-  elapsedMs: number;
-  indexId: number;
-}
-
-export interface EvaluationMetric {
-  indexType: IndexType;
-  recall: number;
-  meanLatencyMs: number;
-  p95LatencyMs: number;
-  qps: number;
-  buildTimeMs?: number;
 }
