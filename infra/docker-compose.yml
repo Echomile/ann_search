@@ -1,0 +1,110 @@
+name: ann-search
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: ann-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ann
+      POSTGRES_PASSWORD: ann
+      POSTGRES_DB: ann
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ann -d ann"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - ann-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: ann-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - ann-net
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: ann-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ann:ann@postgres:5432/ann
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /app/data
+      INDEX_DIR: /app/data/indexes
+      CORS_ORIGINS: http://localhost:5173
+    volumes:
+      - ../data:/app/data
+      - ../indexes:/app/data/indexes
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - ann-net
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: ann-worker
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ann:ann@postgres:5432/ann
+      REDIS_URL: redis://redis:6379/0
+      DATA_DIR: /app/data
+      INDEX_DIR: /app/data/indexes
+    volumes:
+      - ../data:/app/data
+      - ../indexes:/app/data/indexes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: arq app.tasks.worker.WorkerSettings
+    networks:
+      - ann-net
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: ann-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - ann-net
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  ann-net:
+    driver: bridge

@@ -1,0 +1,45 @@
+name: ann-search
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ../backend:/app
+      - ../data:/app/data
+      - ../indexes:/app/data/indexes
+      - /app/.venv
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      WATCHFILES_FORCE_POLLING: "true"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ../backend:/app
+      - ../data:/app/data
+      - ../indexes:/app/data/indexes
+      - /app/.venv
+    command: arq app.tasks.worker.WorkerSettings --watch /app/app
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: dev
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "5173:5173"
+    command: npm run dev -- --host 0.0.0.0 --port 5173

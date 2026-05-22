@@ -38,3 +38,32 @@ indexes/*
 # system files
 .DS_Store
 Thumbs.db
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 环境配置
+.env
+.env.local
+
+# 大文件与缓存
+*.bin
+*.faiss
+*.hnsw
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+.claude-tasks/
