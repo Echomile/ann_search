@@ -5,6 +5,7 @@
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,7 +24,10 @@ class Settings(BaseSettings):
         DATA_DIR: 数据根目录。
         INDEX_DIR: 索引文件目录。
         PROCESSED_DIR: 预处理后数据目录。
-        LLM_API_KEY: RAG 加分项使用的大模型 API Key（可选）。
+        LLM_PROVIDER: 大模型提供方，取值 ``dashscope|openai|mock``，默认 ``mock``。
+        LLM_MODEL: 大模型名称，例如 ``qwen-plus`` 或 ``gpt-4o-mini``。
+        LLM_API_KEY: 大模型 API Key（可选）。
+        LLM_BASE_URL: 大模型 OpenAI 兼容 endpoint（可选）。
         CORS_ORIGINS: 允许的跨域来源列表。
     """
 
@@ -49,7 +53,10 @@ class Settings(BaseSettings):
     INDEX_DIR: str = "./data/indexes"
     PROCESSED_DIR: str = "./data/processed"
 
+    LLM_PROVIDER: Literal["dashscope", "openai", "mock"] = "mock"
+    LLM_MODEL: str = "qwen-plus"
     LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = ""
 
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",
