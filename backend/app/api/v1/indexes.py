@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -241,9 +242,7 @@ async def delete_index(
     await db.commit()
 
     if path and os.path.exists(path):
-        try:
+        with contextlib.suppress(OSError):
             os.remove(path)
-        except OSError:  # noqa: PERF203
-            pass
 
     return Message(detail=f"索引 {index_id} 已删除")

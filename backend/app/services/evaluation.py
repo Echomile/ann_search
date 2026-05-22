@@ -51,8 +51,8 @@ def compute_recall(
     hits = 0
     num_queries = approx.shape[0]
     for i in range(num_queries):
-        approx_set = set(int(x) for x in approx[i, :k_eff])
-        truth_set = set(int(x) for x in truth[i, :k_eff])
+        approx_set = {int(x) for x in approx[i, :k_eff]}
+        truth_set = {int(x) for x in truth[i, :k_eff]}
         hits += len(approx_set & truth_set)
     return float(hits) / float(num_queries * k_eff)
 

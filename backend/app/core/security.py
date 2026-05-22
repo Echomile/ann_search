@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
@@ -68,7 +68,7 @@ def create_access_token(
         str: 编码后的 JWT 字符串。
     """
     minutes = expires_minutes if expires_minutes is not None else settings.ACCESS_TOKEN_EXPIRE_MINUTES
-    expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    expire = datetime.now(UTC) + timedelta(minutes=minutes)
     payload: dict[str, Any] = {"sub": str(subject), "exp": expire}
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 

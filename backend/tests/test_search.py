@@ -54,7 +54,7 @@ def test_search_with_backend_returns_top_k_in_order(brute_index) -> None:
     assert len(result["results"]) == 5
     distances = [hit["distance"] for hit in result["results"]]
     assert distances == sorted(distances)
-    assert all(0 <= d for d in distances)
+    assert all(d >= 0 for d in distances)
     assert result["index_backend"] == "brute"
     assert result["query_time_ms"] >= 0.0
 

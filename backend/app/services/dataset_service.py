@@ -51,7 +51,7 @@ def gen_h5ad_filename() -> str:
     return f"{uuid.uuid4().hex}.h5ad"
 
 
-async def stream_to_disk(reader: "BinaryIO | object", dest: Path) -> int:
+async def stream_to_disk(reader: BinaryIO | object, dest: Path) -> int:
     """把上传的二进制流分块写入磁盘，返回写入字节数。
 
     ``reader`` 需支持异步 ``read(size)``（FastAPI ``UploadFile`` 即如此），

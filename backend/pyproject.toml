@@ -70,6 +70,20 @@ ignore = ["E501"]
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI 标准用法：在参数默认值里调用 File / Form / Body / Depends 等。
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 asyncio_mode = "auto"

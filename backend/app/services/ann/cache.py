@@ -32,7 +32,7 @@ class IndexCache:
         capacity: 缓存最大容量，超出后淘汰最久未访问条目。
     """
 
-    _instance: "IndexCache | None" = None
+    _instance: IndexCache | None = None
 
     def __init__(self, capacity: int = 4) -> None:
         """初始化缓存。
@@ -45,7 +45,7 @@ class IndexCache:
         self._lock = asyncio.Lock()
 
     @classmethod
-    def instance(cls, capacity: int = 4) -> "IndexCache":
+    def instance(cls, capacity: int = 4) -> IndexCache:
         """获取单例。
 
         Args:

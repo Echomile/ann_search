@@ -13,12 +13,11 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+# 触发模型注册：确保 Base.metadata 包含所有业务表。
+from app import models  # noqa: F401
 from app.api.deps import get_db
 from app.db.base import Base
 from app.main import app
-
-# 触发模型注册：确保 Base.metadata 包含所有业务表。
-from app import models  # noqa: F401
 
 
 @pytest_asyncio.fixture
