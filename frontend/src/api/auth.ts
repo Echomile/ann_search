@@ -4,7 +4,12 @@ import type { LoginRequest, LoginResponse, RegisterRequest, User } from '@/types
 // 用户认证 API
 export const authApi = {
   login: async (payload: LoginRequest): Promise<LoginResponse> => {
-    const { data } = await httpClient.post<LoginResponse>('/auth/login', payload);
+    const body = new URLSearchParams();
+    body.set('username', payload.username);
+    body.set('password', payload.password);
+    const { data } = await httpClient.post<LoginResponse>('/auth/login', body, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
     return data;
   },
 

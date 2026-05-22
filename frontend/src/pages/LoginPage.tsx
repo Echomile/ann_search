@@ -21,7 +21,7 @@ const LoginPage = () => {
     setLoading(true);
     try {
       const res = await authApi.login(values);
-      login(res.accessToken, res.user);
+      login(res.access_token, res.user);
       message.success('登录成功');
       navigate(from, { replace: true });
     } finally {

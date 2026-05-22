@@ -1,11 +1,10 @@
-// 用户认证相关类型
+// 用户认证相关类型（与后端 Pydantic schema 严格对齐 snake_case）
 
 export interface User {
   id: number;
   username: string;
-  email?: string;
   role: 'admin' | 'user';
-  createdAt?: string;
+  created_at: string;
 }
 
 export interface LoginRequest {
@@ -16,11 +15,10 @@ export interface LoginRequest {
 export interface RegisterRequest {
   username: string;
   password: string;
-  email?: string;
 }
 
 export interface LoginResponse {
-  accessToken: string;
-  tokenType: string;
+  access_token: string;
+  token_type: string;
   user: User;
 }
