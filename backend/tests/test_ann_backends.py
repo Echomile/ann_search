@@ -56,9 +56,9 @@ def _recall(pred: np.ndarray, gt: np.ndarray) -> float:
 
 
 def test_factory_lists_backends() -> None:
-    """factory 应注册 4 个后端。"""
+    """factory 应注册全部 5 个后端（4 基础 + 1 改进版 adaptive-hnsw）。"""
     names = set(list_backends())
-    assert names == {"hnswlib", "faiss-hnsw", "faiss-ivfpq", "brute"}
+    assert names == {"hnswlib", "faiss-hnsw", "faiss-ivfpq", "brute", "adaptive-hnsw"}
 
 
 def test_factory_unknown_backend_raises() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.services.ann.adaptive_hnsw_backend import AdaptiveHnswBackend
 from app.services.ann.base import IndexBackend
 from app.services.ann.brute_backend import BruteBackend
 from app.services.ann.faiss_backend import FaissHnswBackend, FaissIvfPqBackend
@@ -12,6 +13,7 @@ _BACKENDS: dict[str, type[IndexBackend]] = {
     "faiss-hnsw": FaissHnswBackend,
     "faiss-ivfpq": FaissIvfPqBackend,
     "brute": BruteBackend,
+    "adaptive-hnsw": AdaptiveHnswBackend,
 }
 
 
