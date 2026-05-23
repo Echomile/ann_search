@@ -217,17 +217,26 @@ async def get_index_status(
 
 @router.get(
     "/indexes/cache/stats",
-    summary="索引缓存命中率",
+    summary="两层缓存命中率",
     description=(
-        "返回进程内 :class:`IndexCache` 的命中率与计数器："
-        " ``capacity / size / hits / misses / loads / evictions / hit_ratio / cached_index_ids``。"
-        "用于观测 ANN 索引常驻缓存的效果，命中率长期低意味着工作集大于 capacity 应调大。"
+        "聚合返回**两层缓存**的命中率与计数器："
+        "\n\n"
+        "- **IndexCache**（进程内 LRU 常驻 ANN 索引）："
+        " ``capacity / size / hits / misses / loads / evictions / hit_ratio / cached_index_ids``；\n"
+        "- **SearchCache**（Redis 检索结果缓存，F2 引入）："
+        " ``search_cache_hits / search_cache_misses / search_cache_errors / search_cache_hit_ratio``。\n\n"
+        "用于一次性观测索引常驻缓存与检索结果缓存的协同效果——命中率长期低意味着"
+        "工作集大于 capacity 或 TTL 偏短，应相应调大。"
         "鉴权：当前登录用户均可读（无敏感信息）。"
     ),
 )
 async def get_cache_stats(current_user: CurrentUser) -> dict[str, Any]:  # noqa: ARG001
-    """返回 :class:`IndexCache` 命中率与内部计数。"""
-    return IndexCache.instance().stats()
+    """返回 IndexCache 与 SearchCache 两层缓存命中率与内部计数。"""
+    from app.services.search_cache import get_cache_metrics  # noqa: PLC0415
+
+    base = IndexCache.instance().stats()
+    base.update(get_cache_metrics())
+    return base
 
 
 @router.get(

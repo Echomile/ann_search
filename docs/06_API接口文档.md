@@ -794,8 +794,32 @@ curl "$API/datasets/3/umap" -H "Authorization: Bearer $TOKEN" | jq '.coords | le
 
 | 方法 | 路径 | 摘要 | 备注 |
 | --- | --- | --- | --- |
-| `GET` | `/indexes/cache/stats` | 进程内 LRU 缓存命中率 | 返回 `{capacity, size, hits, misses, loads, evictions, hit_ratio, cached_index_ids}` |
+| `GET` | `/indexes/cache/stats` | 两层缓存命中率 | 聚合 IndexCache（进程 LRU）+ SearchCache（Redis）返回字段，详见下方示例 |
 | `GET` | `/indexes/{index_id}/latest-benchmark` | 索引视角读最近评测 | 与 `/evaluation/{index_id}/latest` 等价但走 indexes 路由；无评测返回 `{has_benchmark: false}` + 200 |
+
+`GET /indexes/cache/stats` 返回示例（F2 part2-b 起合并两层缓存）：
+
+```json
+{
+  "capacity": 4,
+  "size": 2,
+  "hits": 12,
+  "misses": 3,
+  "loads": 3,
+  "evictions": 0,
+  "hit_ratio": 0.8,
+  "cached_index_ids": [2, 1],
+  "search_cache_hits": 8,
+  "search_cache_misses": 5,
+  "search_cache_errors": 0,
+  "search_cache_hit_ratio": 0.6154
+}
+```
+
+字段分组说明：
+
+- **前 8 个字段**属于 **IndexCache**（`backend/app/services/ann/cache.py`，进程内 LRU 常驻 ANN 索引）：`capacity` 为容量上限；`size` 为当前驻留数；`hits / misses` 为加载是否命中缓存；`loads` 为累计加载次数；`evictions` 为 LRU 淘汰次数；`hit_ratio` 为四位小数命中率；`cached_index_ids` 为当前驻留索引 ID 列表（按 LRU 顺序）。
+- **后 4 个字段**属于 **SearchCache**（`backend/app/services/search_cache.py`，Redis 检索结果缓存，key = SHA256(`v1|index_id|top_k|query|filters`)，TTL 默认 300s）：`search_cache_hits / misses` 来自 `cached_or_compute` 的 Redis GET 命中/未命中；`search_cache_errors` 累计 Redis 异常计数（异常不影响主链路）；`search_cache_hit_ratio` 为四位小数命中率。Redis 不可用时各字段保持 0 并不影响检索。
 
 ### 6.10.3 检索日志统计
 
