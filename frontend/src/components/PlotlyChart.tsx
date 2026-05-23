@@ -1,9 +1,10 @@
 import { useMemo, type ComponentProps } from 'react';
 import createPlotlyComponent from 'react-plotly.js/factory';
-import PlotlyDist from 'plotly.js-dist-min';
+import PlotlyDist from 'plotly.js-basic-dist';
 
 // react-plotly.js 默认入口会 require 'plotly.js/dist/plotly'，
-// 该路径在仅安装 dist-min 包时不可达，因此使用 factory 手动注入 plotly 引擎。
+// 该路径在仅安装 basic-dist 包时不可达，因此使用 factory 手动注入 plotly 引擎。
+// basic-dist 只包含 scatter / bar / pie，足够覆盖本项目可视化（UMAP 散点 + Recall/QPS 折线柱状），相比 dist-min 减半体积。
 const Plot = createPlotlyComponent(PlotlyDist as object);
 
 type PlotComponentProps = ComponentProps<typeof Plot>;

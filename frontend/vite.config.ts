@@ -29,7 +29,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          plotly: ['plotly.js-dist-min', 'react-plotly.js'],
+          plotly: ['plotly.js-basic-dist', 'react-plotly.js'],
           'antd-icons': ['@ant-design/icons'],
           antd: ['antd'],
           vendor: ['react', 'react-dom', 'react-router-dom', 'zustand', 'axios'],
