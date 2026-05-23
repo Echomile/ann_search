@@ -115,3 +115,41 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+  docker-buildx:
+    name: docker buildx (multi-arch dry-run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [backend-test, frontend-test]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ann-search-backend:ci
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Build frontend (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ann-search-frontend:ci
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max

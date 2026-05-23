@@ -1,5 +1,12 @@
 # 单细胞 ANN 检索系统后端镜像
+# 支持 multi-arch（linux/amd64, linux/arm64）：base 镜像 python:3.12-slim 原生跨架构
+# 通过 docker buildx --platform 选择目标架构，不在此 FROM 上写死 --platform=
 FROM python:3.12-slim AS base
+
+# buildx 自动注入：TARGETPLATFORM/TARGETARCH/BUILDPLATFORM/BUILDARCH
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETARCH
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

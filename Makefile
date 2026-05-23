@@ -15,7 +15,8 @@ COMPOSE_DEV   := docker compose -f infra/docker-compose.yml -f infra/docker-comp
         migrate makemigration test test-backend test-frontend \
         lint lint-backend lint-frontend format format-backend format-frontend \
         install install-backend install-frontend clean clean-cache prune \
-        e2e screenshots demo-video slides submission benchmark
+        e2e screenshots demo-video slides submission benchmark \
+        docker-buildx docker-buildx-local docker-buildx-push
 
 help: ## 列出全部可用命令
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -44,6 +45,47 @@ build: ## 构建镜像
 
 rebuild: ## 强制无缓存重新构建
 	$(COMPOSE) build --no-cache
+
+# ============ Multi-arch Buildx ============
+# 镜像与 registry 占位变量，可通过环境变量覆盖，例如：
+#   make docker-buildx-push REGISTRY=ghcr.io/<org>/<repo> TAG=v1.0.0
+REGISTRY      ?= ghcr.io/your-org/ann-search
+TAG           ?= dev
+PLATFORMS     ?= linux/amd64,linux/arm64
+BUILDER_NAME  ?= ann-search-builder
+
+docker-buildx: ## 构建多架构镜像（默认 linux/amd64,linux/arm64，不推送）
+	@echo "==> 准备 buildx builder: $(BUILDER_NAME)"
+	docker buildx create --name $(BUILDER_NAME) --use 2>/dev/null || docker buildx use $(BUILDER_NAME)
+	docker buildx inspect --bootstrap >/dev/null
+	@echo "==> 构建 backend (platforms=$(PLATFORMS))"
+	docker buildx build --platform $(PLATFORMS) \
+		-t ann-search-backend:multi \
+		-f backend/Dockerfile backend
+	@echo "==> 构建 frontend (platforms=$(PLATFORMS))"
+	docker buildx build --platform $(PLATFORMS) \
+		-t ann-search-frontend:multi \
+		-f frontend/Dockerfile frontend
+	@echo "提示：多平台构建未指定 --push/--load 时仅缓存在 buildx，不会出现在 docker images。"
+
+docker-buildx-local: ## 仅构建当前 host 架构并加载到本机（验收时跑通用）
+	docker buildx create --name $(BUILDER_NAME) --use 2>/dev/null || docker buildx use $(BUILDER_NAME)
+	docker buildx build --load \
+		-t ann-search-backend:local \
+		-f backend/Dockerfile backend
+	docker buildx build --load \
+		-t ann-search-frontend:local \
+		-f frontend/Dockerfile frontend
+
+docker-buildx-push: ## 构建并推送多架构镜像到 registry（需先 docker login）
+	docker buildx create --name $(BUILDER_NAME) --use 2>/dev/null || docker buildx use $(BUILDER_NAME)
+	docker buildx inspect --bootstrap >/dev/null
+	docker buildx build --platform $(PLATFORMS) --push \
+		-t $(REGISTRY)/backend:$(TAG) \
+		-f backend/Dockerfile backend
+	docker buildx build --platform $(PLATFORMS) --push \
+		-t $(REGISTRY)/frontend:$(TAG) \
+		-f frontend/Dockerfile frontend
 
 # ============ 进入容器 ============
 backend-shell: ## 进入 backend 容器
