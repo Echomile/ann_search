@@ -218,6 +218,7 @@ uv run arq app.tasks.worker.WorkerSettings
 - **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（18 张幻灯片，Marp Markdown 一键生成）。
 - **配音讲稿**：[`docs/slides/speaker_notes.md`](docs/slides/speaker_notes.md)
 - **端到端测试脚本**：[`e2e/test_liver_e2e.py`](e2e/test_liver_e2e.py)（注入 1.3 GB liver.h5ad 全流程验证） · [`e2e/demo_video.py`](e2e/demo_video.py)（视频自动录制）
+- **D2 Playwright 流程测试**（共享 [`e2e/conftest.py`](e2e/conftest.py)）：[`test_admin_e2e.py`](e2e/test_admin_e2e.py)（/admin/users CRUD + 重置密码） · [`test_upload_progress_e2e.py`](e2e/test_upload_progress_e2e.py)（双进度条 + threading 高频轮询） · [`test_stats_e2e.py`](e2e/test_stats_e2e.py)（评测后 SearchLog Dashboard） · [`test_rag_e2e.py`](e2e/test_rag_e2e.py)（自然语言查询 + hits 表格）；任一文件均支持 `cd backend && uv run python ../e2e/test_xxx_e2e.py` 或 `uv run pytest ../e2e/`。
 - **9 张实测截图**：[`docs/e2e_screenshots/`](docs/e2e_screenshots/)
 
 ## 业务页面预览（liver.h5ad 真实数据）

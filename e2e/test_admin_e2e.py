@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import sys
@@ -33,6 +34,8 @@ sys.path.insert(0, str(ROOT / "e2e"))
 # fmt: off
 from conftest import BACKEND_URL, BASE_URL, login_demo  # noqa: E402
 # fmt: on
+
+SCREENSHOT_DIR = ROOT / "docs" / "e2e_screenshots"
 
 
 def _register_temp_user(username: str, password: str = "TempPass1234") -> int:
@@ -125,6 +128,15 @@ def test_admin_users_flow(page: Page) -> None:
         pwd = (code.text_content() or "").strip()
         assert len(pwd) >= 8, f"temp_password 应至少 8 字符，实际 {pwd!r}"
         print(f"[step] 重置密码 Modal 显示 temp_password={pwd[:4]}***（长度 {len(pwd)}）")
+
+        if os.environ.get("E2E_SCREENSHOT", "1") not in {"0", "false", "no"}:
+            try:
+                SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+                shot = SCREENSHOT_DIR / "12_admin_users.png"
+                page.screenshot(path=str(shot), full_page=True)
+                print(f"[shot] {shot.relative_to(ROOT)}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[shot] 截图失败（忽略）: {exc}")
 
         modal.get_by_role("button", name=re.compile(r"我已记下")).click()
         page.wait_for_timeout(500)

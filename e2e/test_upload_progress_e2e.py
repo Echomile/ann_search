@@ -40,10 +40,10 @@ sys.path.insert(0, str(ROOT / "e2e"))
 from conftest import BACKEND_URL, backend_login_token, login_demo  # noqa: E402
 # fmt: on
 
-N_CELLS = 80_000
-N_GENES = 300
+N_CELLS = 150_000
+N_GENES = 400
 PCA_DIM = 30
-POLL_INTERVAL_S = 0.03
+POLL_INTERVAL_S = 0.02
 
 
 def _make_mini_h5ad(path: Path) -> int:
@@ -101,39 +101,65 @@ def _cleanup_dataset(token: str, dataset_id: int) -> None:
 
 
 class _ProgressPoller(threading.Thread):
-    """后台线程高频轮询 ``GET /datasets/{id}/upload-progress``。
+    """后台高频轮询 ``GET /datasets/{id}/upload-progress``。
 
-    用独立线程 + ``requests`` 直接打到后端，避免 ``page.evaluate``
-    每次 ~30ms 的桥接开销，确保 ``stream_to_disk`` 内部那短暂的窗口
-    （``bytes_received > 0`` 且 ``status=uploading``）能被采样到。
+    在 button click 之前启动，先轮询 ``GET /datasets`` 列表自动发现新建的
+    数据集 ID（``id > max_pre``），随后立即开始对该 dataset 的
+    ``/upload-progress`` 端点采样，直到 ``status in {ready, failed}``。
+
+    用 Python ``threading`` + ``requests`` 直接打到后端，避开浏览器 fetch
+    与 ``page.evaluate`` 各自的 ~30 ms 桥接开销 —— 实测能稳定捕捉到
+    ``stream_to_disk`` 内 ``bytes_received > 0`` 那个 < 50 ms 的瞬时窗口。
     """
 
-    def __init__(self, token: str, backend_url: str, dataset_id: int) -> None:
+    def __init__(
+        self,
+        token: str,
+        backend_url: str,
+        max_pre_id: int,
+        interval_s: float = POLL_INTERVAL_S,
+    ) -> None:
         super().__init__(daemon=True)
         self.token = token
         self.backend_url = backend_url
-        self.dataset_id = dataset_id
+        self.max_pre_id = max_pre_id
+        self.interval_s = interval_s
         self.samples: list[dict] = []
-        self._stop = threading.Event()
+        self.dataset_id: int | None = None
+        self._stop_event = threading.Event()
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
 
     def run(self) -> None:  # noqa: D401
         sess = requests.Session()
         headers = {"Authorization": f"Bearer {self.token}"}
-        while not self._stop.is_set():
+        t0 = time.time()
+        while not self._stop_event.is_set():
             try:
-                r = sess.get(
-                    f"{self.backend_url}/api/v1/datasets/{self.dataset_id}/upload-progress",
-                    headers=headers,
-                    timeout=3,
-                )
-                if r.ok:
-                    self.samples.append(r.json())
+                if self.dataset_id is None:
+                    r = sess.get(
+                        f"{self.backend_url}/api/v1/datasets", headers=headers, timeout=3
+                    )
+                    if r.ok:
+                        cand = [d["id"] for d in r.json() if d["id"] > self.max_pre_id]
+                        if cand:
+                            self.dataset_id = max(cand)
+                if self.dataset_id is not None:
+                    r = sess.get(
+                        f"{self.backend_url}/api/v1/datasets/{self.dataset_id}/upload-progress",
+                        headers=headers,
+                        timeout=3,
+                    )
+                    if r.ok:
+                        data = r.json()
+                        data["_t"] = round(time.time() - t0, 3)
+                        self.samples.append(data)
+                        if data.get("status") in {"ready", "failed"}:
+                            break
             except Exception:  # noqa: BLE001
                 pass
-            time.sleep(POLL_INTERVAL_S)
+            time.sleep(self.interval_s)
 
 
 def test_upload_progress_flow(page: Page, tmp_path: Path) -> None:
@@ -157,46 +183,35 @@ def test_upload_progress_flow(page: Page, tmp_path: Path) -> None:
     page.wait_for_timeout(300)
     print(f"[step] 文件已注入，开始点击 '开始上传'")
 
+    poller = _ProgressPoller(admin_token, BACKEND_URL, max_pre)
+    poller.start()
+    time.sleep(0.05)
+
     new_dataset_id: int | None = None
-    poller: _ProgressPoller | None = None
     try:
         page.get_by_role("button", name="开始上传").click()
-        print("[step] 已点击 开始上传，开始轮询新 dataset_id")
+        print("[step] 已点击 开始上传，等待 poller 终止")
 
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            ids = _evaluate_dataset_ids(page)
-            cand = [i for i in ids if i > max_pre]
-            if cand:
-                new_dataset_id = max(cand)
-                break
-            time.sleep(0.05)
-        assert new_dataset_id is not None, "上传 90s 内未观察到新 dataset_id"
-        print(f"[step] 上传已开始，新 dataset_id={new_dataset_id}")
-
-        poller = _ProgressPoller(admin_token, BACKEND_URL, new_dataset_id)
-        poller.start()
-
-        final_status: str | None = None
         deadline = time.time() + 300
         while time.time() < deadline:
-            if poller.samples:
-                latest = poller.samples[-1]
-                if latest.get("status") in {"ready", "failed"}:
-                    final_status = latest["status"]
-                    break
+            if poller.samples and poller.samples[-1].get("status") in {"ready", "failed"}:
+                break
             time.sleep(0.2)
         poller.stop()
         poller.join(timeout=2)
 
         samples = poller.samples
+        new_dataset_id = poller.dataset_id
+
         seen_positive_bytes = any(
             isinstance(s.get("bytes_received"), int) and s["bytes_received"] > 0 for s in samples
         )
         seen_uploading = any(s.get("status") == "uploading" for s in samples)
+        final_status = samples[-1].get("status") if samples else None
         print(
-            f"[poll] 采样 {len(samples)} 条；status=uploading 出现 {seen_uploading}；"
-            f"bytes_received>0 出现 {seen_positive_bytes}"
+            f"[poll] dataset_id={new_dataset_id} 采样 {len(samples)} 条；"
+            f"status=uploading 出现 {seen_uploading}；bytes_received>0 出现 {seen_positive_bytes}；"
+            f"final={final_status}"
         )
         for s in samples[:3]:
             print(f"[sample-head] {s}")
@@ -211,8 +226,8 @@ def test_upload_progress_flow(page: Page, tmp_path: Path) -> None:
         assert final_status == "ready", f"数据集最终状态非 ready，实际为 {final_status}"
         print(f"[done] 数据集 #{new_dataset_id} 上传 + 预处理完成")
     finally:
-        if poller is not None and poller.is_alive():
-            poller.stop()
+        poller.stop()
+        if poller.is_alive():
             poller.join(timeout=2)
         if new_dataset_id is not None:
             _cleanup_dataset(admin_token, new_dataset_id)

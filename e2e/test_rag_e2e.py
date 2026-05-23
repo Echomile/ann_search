@@ -35,15 +35,39 @@ def test_rag_query_flow(page: Page) -> None:
     """从输入框输入 → 发送 → 等回复 → 验证 hits 表格行数 ≥ 1。"""
     login_demo(page)
 
+    target = page.evaluate(
+        """async () => {
+            const t = localStorage.getItem('ann_search_token');
+            const headers = {Authorization: `Bearer ${t}`};
+            const ds = await (await fetch('/api/v1/datasets', {headers})).json();
+            for (const d of ds.filter(x => x.status === 'ready')) {
+                const idxs = await (await fetch(`/api/v1/datasets/${d.id}/indexes`, {headers})).json();
+                if (idxs.some(i => i.status === 'ready')) {
+                    return {id: d.id, name: d.name};
+                }
+            }
+            return null;
+        }"""
+    )
+    assert target, "未找到任何带 ready 索引的数据集，无法测试 RAG"
+    print(f"[setup] 目标数据集 #{target['id']} {target['name']}")
+
     page.goto(f"{BASE_URL}/rag")
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(2_000)
 
     ds_selection = page.locator(".ant-form-item .ant-select-selection-item").first
     expect(ds_selection).to_be_visible(timeout=10_000)
+    if f"#{target['id']}" not in (ds_selection.text_content() or ""):
+        ds_selection.click()
+        page.wait_for_timeout(500)
+        page.locator(".ant-select-dropdown:visible .ant-select-item-option").filter(
+            has_text=f"#{target['id']}"
+        ).first.click()
+        page.wait_for_timeout(500)
     selected_text = (ds_selection.text_content() or "").strip()
-    assert selected_text, "RagChatPage 未自动选中 ready 数据集"
-    print(f"[setup] 默认选中数据集: {selected_text}")
+    assert f"#{target['id']}" in selected_text, f"未切到目标数据集，当前 {selected_text!r}"
+    print(f"[setup] 数据集 select 当前值: {selected_text}")
 
     textarea = page.get_by_placeholder("输入自然语言查询，Enter 发送，Shift+Enter 换行")
     expect(textarea).to_be_visible()
