@@ -3,8 +3,9 @@
 模块组织：
     - :class:`LLMClient`：客户端协议，定义 ``parse_query`` 与 ``summarize``。
     - :class:`MockLLMClient`：纯规则解析实现，默认启用，便于无外网测试。
-    - :class:`DashScopeLLMClient` / :class:`OpenAILLMClient`：真实 LLM 实现。
-    - :func:`get_llm_client`：根据 :data:`settings.LLM_PROVIDER` 返回对应实例。
+    - :class:`DashScopeLLMClient` / :class:`OpenAILLMClient` / :class:`AnthropicClient`：
+      真实 LLM 实现，覆盖通义千问、OpenAI 兼容与 Claude Opus。
+    - :func:`get_llm_client`：根据 :data:`settings.LLM_PROVIDER` 返回对应实例，失败回退 Mock。
     - :func:`rag_answer`：完整 RAG 主流程，供路由层 ``await`` 调用。
 """
 
@@ -370,6 +371,89 @@ class OpenAILLMClient:
             return MockLLMClient().summarize(query, hits)
 
 
+class AnthropicClient:
+    """基于 anthropic SDK 的 Claude Opus 客户端。
+
+    使用官方 ``anthropic.Anthropic.messages.create`` 接口：
+
+        - ``parse_query``：通过 ``system`` prompt 约束模型返回严格 JSON，再转 :class:`ParsedQuery`；
+        - ``summarize``：要求模型基于命中 JSON 生成 3-5 句中文总结。
+
+    任意阶段失败（API 异常、JSON 解析失败、SDK 缺失）均回退到 :class:`MockLLMClient`，
+    确保 RAG 主流程不被外部依赖阻断。
+    """
+
+    def __init__(self, model: str, api_key: str, max_tokens: int = 1024) -> None:
+        """初始化 Anthropic 客户端。
+
+        Args:
+            model: Claude 模型名，例如 ``claude-opus-4-20250514``。
+            api_key: Anthropic API Key；为空时由 SDK 读取 ``ANTHROPIC_API_KEY`` 环境变量。
+            max_tokens: 单次响应最大生成 token 数；总结场景 1024 通常足够。
+
+        Raises:
+            RuntimeError: 缺少 API Key 或 SDK 不可用时抛出，工厂层会捕获并回退 Mock。
+        """
+        if not api_key:
+            raise RuntimeError("AnthropicClient 需要 ANTHROPIC_API_KEY 或 LLM_API_KEY")
+        try:
+            from anthropic import Anthropic  # type: ignore  # noqa: PLC0415
+        except ImportError as exc:  # pragma: no cover - 仅在缺包时触发
+            raise RuntimeError("缺少 anthropic SDK，请先安装 anthropic>=0.40") from exc
+        self.model = model
+        self._max_tokens = max_tokens
+        self._client = Anthropic(api_key=api_key)
+
+    def _call(self, prompt: str, *, system: str = _SYSTEM_PROMPT) -> str:
+        """同步调用 ``messages.create`` 并返回首个 text block 的纯文本。"""
+        response = self._client.messages.create(
+            model=self.model,
+            max_tokens=self._max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        for block in getattr(response, "content", []) or []:
+            text = getattr(block, "text", None)
+            if isinstance(text, str) and text:
+                return text
+        raise RuntimeError(f"Anthropic 返回为空: {response}")
+
+    def parse_query(self, query: str, available_filters: list[str]) -> ParsedQuery:
+        """让 Claude 把自然语言解析为结构化检索参数，强制 JSON 输出。"""
+        prompt = (
+            f"available_filters = {available_filters}\n"
+            f"用户问题: {query}\n"
+            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, '
+            '"top_k": 10, "intent": "..."}'
+        )
+        try:
+            return _coerce_parsed(
+                _safe_json_loads(self._call(prompt)),
+                available_filters,
+                default_top_k=10,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Anthropic parse_query 失败，回退 mock: %s", exc)
+            return MockLLMClient().parse_query(query, available_filters)
+
+    def summarize(self, query: str, hits: list[dict[str, Any]]) -> str:
+        """让 Claude 基于命中 JSON 用中文生成 3-5 句总结。"""
+        digest = json.dumps(hits[:10], ensure_ascii=False, default=str)
+        prompt = (
+            f"用户原始问题: {query}\n"
+            f"以下是相似细胞检索结果（JSON，至多 10 条）:\n{digest}\n"
+            "请用中文给出 3-5 句总结，包含命中数量、主要细胞类型、组织/疾病分布与代表 cell_id。"
+        )
+        try:
+            return self._call(
+                prompt,
+                system="你是一个生物信息助手，用简洁中文回答用户问题。",
+            ).strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Anthropic summarize 失败，回退 mock: %s", exc)
+            return MockLLMClient().summarize(query, hits)
+
+
 def get_llm_client() -> LLMClient:
     """根据 :data:`settings.LLM_PROVIDER` 返回对应的 LLM 客户端实例。
 
@@ -387,6 +471,10 @@ def get_llm_client() -> LLMClient:
                 api_key=settings.LLM_API_KEY,
                 base_url=settings.LLM_BASE_URL,
             )
+        if provider == "anthropic":
+            api_key = settings.ANTHROPIC_API_KEY or settings.LLM_API_KEY
+            model = settings.LLM_MODEL or "claude-opus-4-20250514"
+            return AnthropicClient(model=model, api_key=api_key)
     except Exception as exc:  # noqa: BLE001
         logger.warning("初始化 LLM 客户端失败（provider=%s），回退 mock: %s", provider, exc)
     return MockLLMClient()

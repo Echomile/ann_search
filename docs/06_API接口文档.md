@@ -575,7 +575,17 @@
 | --- | --- |
 | `summary` | 自然语言检索 |
 | 鉴权 | 是 |
-| 描述 | 用自然语言提问，LLM 解析为结构化检索参数（`cell_id` 或 metadata 过滤条件），调用 ANN 检索后再由 LLM 生成自然语言回答。`LLM_PROVIDER=mock` 时使用关键词规则与模板化总结，无需任何外部 API Key。 |
+| 描述 | 用自然语言提问，LLM 解析为结构化检索参数（`cell_id` 或 metadata 过滤条件），调用 ANN 检索后再由 LLM 生成自然语言回答。`LLM_PROVIDER` 支持 `mock` / `dashscope`（通义千问）/ `openai`（OpenAI 兼容端点）/ `anthropic`（Claude Opus，例如 `claude-opus-4-20250514`），其中 `mock` 使用关键词规则与模板化总结，无需任何外部 API Key；真实 provider 在 SDK 缺失或调用失败时自动回退 Mock 保证可用性。 |
+
+**LLM provider 配置（`.env`）**：
+
+| 变量 | 适用 provider | 说明 |
+| --- | --- | --- |
+| `LLM_PROVIDER` | 全部 | 取值 `mock` / `dashscope` / `openai` / `anthropic`，默认 `mock` |
+| `LLM_MODEL` | 全部 | 例如 `qwen-plus` / `gpt-4o-mini` / `claude-opus-4-20250514` |
+| `LLM_API_KEY` | dashscope / openai / anthropic | 通用 API Key |
+| `ANTHROPIC_API_KEY` | anthropic | 可选，配置后覆盖 `LLM_API_KEY` 仅用于 anthropic |
+| `LLM_BASE_URL` | openai | 仅 OpenAI 兼容 endpoint 时使用 |
 
 **请求体（JSON, `RagQueryRequest`）**：
 

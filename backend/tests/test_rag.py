@@ -9,6 +9,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -27,7 +29,7 @@ from app.models.user import User
 from app.schemas.rag import RagQueryRequest
 from app.services import search as search_service
 from app.services.ann.brute_backend import BruteBackend
-from app.services.rag import MockLLMClient, rag_answer
+from app.services.rag import AnthropicClient, MockLLMClient, get_llm_client, rag_answer
 
 TEST_DSN = "sqlite+aiosqlite:///:memory:"
 
@@ -253,3 +255,97 @@ async def test_rag_answer_respects_request_top_k(
         llm=MockLLMClient(),
     )
     assert len(response.hits) <= 3
+
+
+def _build_fake_anthropic_module(
+    response_text: str | Exception,
+    captured: dict[str, object] | None = None,
+) -> types.ModuleType:
+    """构造一个最小可用的 fake ``anthropic`` 模块，供 monkeypatch 注入 ``sys.modules``。
+
+    Args:
+        response_text: ``messages.create`` 应返回的文本，或要抛出的异常实例。
+        captured: 可选 dict，将记录最近一次 ``create`` 的关键字参数，便于断言。
+    """
+
+    class _FakeMessages:
+        """模拟 ``Anthropic().messages``。"""
+
+        def create(self, **kwargs: object) -> object:
+            if captured is not None:
+                captured["kwargs"] = kwargs
+            if isinstance(response_text, Exception):
+                raise response_text
+            block = types.SimpleNamespace(type="text", text=response_text)
+            return types.SimpleNamespace(content=[block])
+
+    class _FakeAnthropic:
+        """模拟 ``anthropic.Anthropic`` 构造器。"""
+
+        def __init__(self, api_key: str | None = None, **_: object) -> None:
+            self.api_key = api_key
+            self.messages = _FakeMessages()
+
+    module = types.ModuleType("anthropic")
+    module.Anthropic = _FakeAnthropic  # type: ignore[attr-defined]
+    return module
+
+
+def test_anthropic_client_parse_query_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``messages.create`` 返回严格 JSON 时，``parse_query`` 应正确转为 :class:`ParsedQuery`。"""
+    captured: dict[str, object] = {}
+    payload = json.dumps(
+        {
+            "cell_id": None,
+            "filters": {"cell_type": "hepatocyte"},
+            "top_k": 8,
+            "intent": "查找 hepatocyte",
+        },
+        ensure_ascii=False,
+    )
+    fake_module = _build_fake_anthropic_module(payload, captured=captured)
+    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
+
+    client = AnthropicClient(model="claude-opus-4-20250514", api_key="sk-test")
+    parsed = client.parse_query(
+        "找 hepatocyte",
+        available_filters=["cell_type", "tissue"],
+    )
+
+    assert parsed.cell_id is None
+    assert parsed.filters == {"cell_type": "hepatocyte"}
+    assert parsed.top_k == 8
+    assert parsed.intent == "查找 hepatocyte"
+    kwargs = captured["kwargs"]
+    assert isinstance(kwargs, dict)
+    assert kwargs["model"] == "claude-opus-4-20250514"
+    assert kwargs["messages"][0]["role"] == "user"  # type: ignore[index]
+
+
+def test_anthropic_client_parse_query_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``messages.create`` 抛异常时，``parse_query`` 应回退到 :class:`MockLLMClient`。"""
+    fake_module = _build_fake_anthropic_module(RuntimeError("anthropic api boom"))
+    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
+
+    client = AnthropicClient(model="claude-opus-4-20250514", api_key="sk-test")
+    parsed = client.parse_query(
+        "找肝细胞 hepatocyte，top 5",
+        available_filters=["cell_type", "tissue"],
+    )
+
+    assert parsed.filters.get("cell_type") == "hepatocyte"
+    assert parsed.top_k == 5
+
+
+def test_factory_returns_mock_when_anthropic_sdk_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LLM_PROVIDER=anthropic`` 但 SDK 缺失时，工厂应回退 :class:`MockLLMClient` 不抛异常。"""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "anthropic")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+
+    client = get_llm_client()
+    assert isinstance(client, MockLLMClient)
