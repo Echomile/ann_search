@@ -3,8 +3,11 @@
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
 <p align="center">
+  <img src="https://img.shields.io/badge/release-v1.1.0-blue?logo=git" alt="Release"/>
   <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI"/>
-  <img src="https://img.shields.io/badge/tests-37%2F37%20passed-brightgreen?logo=pytest" alt="Tests"/>
+  <img src="https://img.shields.io/badge/pytest-76%2F76%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
+  <img src="https://img.shields.io/badge/vitest-42%2F42%20passed-brightgreen?logo=vitest" alt="Frontend Tests"/>
+  <img src="https://img.shields.io/badge/REST_API-31%2B-009688?logo=fastapi" alt="API"/>
   <img src="https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/FastAPI-0.118%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
   <img src="https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white" alt="React"/>
@@ -21,11 +24,13 @@
 </p>
 
 <p align="center">
-  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (5分54秒)</a>
+  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (2'42")</a>
   &nbsp;·&nbsp;
-  <a href="docs/slides/answer_defense.pdf">查看答辩 PPT</a>
+  <a href="docs/slides/answer_defense.pdf">查看答辩 PPT (25 张)</a>
   &nbsp;·&nbsp;
   <a href="docs/benchmark_report.md">性能基准报告</a>
+  &nbsp;·&nbsp;
+  <a href="CHANGELOG.md">v1.1.0 更新日志</a>
   &nbsp;·&nbsp;
   <a href="submission/MANIFEST.md">提交物清单</a>
 </p>
@@ -192,11 +197,39 @@ cd backend
 uv run arq app.tasks.worker.WorkerSettings
 ```
 
-## 加分功能（全部实现）
+## 加分功能（v1.0.0 三项 + v1.1.0 八项）
+
+### v1.0.0 课程要求加分项（三项全做）
 
 - **多数据集联合检索**：`POST /api/v1/search/multi-dataset` 用 `asyncio.gather` 并发查询多个数据集索引，按 min-max 归一化重排后返回全局 Top-K（每条结果附带 `source_dataset_id`）。
 - **ANN 算法改进**：`AdaptiveHnswBackend`（[`backend/app/services/ann/adaptive_hnsw_backend.py`](backend/app/services/ann/adaptive_hnsw_backend.py)）继承 HNSWLIB，按查询难度自适应调整 `ef_search`（首轮小 ef + relative gap 早停 → 升档至上限 512），对易查询省算力、难查询自动加召回。
 - **RAG + 单细胞 LLM 问答**：`POST /api/v1/rag/query` 三段式 parse → search → summarize；后端实现 `MockLLMClient`（默认零依赖）、`DashScopeLLMClient`、`OpenAILLMClient` 三种客户端可切换。
+
+### v1.1.0 新增 F1~F8 八项工程优化
+
+| 编号 | 功能 | 关键接口 / 模块 | 收益 |
+| :---: | --- | --- | --- |
+| **F1** | 批量检索 + 缓存复用 | `POST /search/batch` | 单次最多 64 查询，命中缓存零计算 |
+| **F2** | Redis 检索结果缓存 | `search/cache.py` + `IndexCache` 合并 metrics | by-id / by-vector 全链路缓存，命中率可查 `GET /search/cache/stats` |
+| **F3** | 索引 mmap 加载 | `IndexCache.load_index` | 大索引冷启动内存减半 |
+| **F4** | 启动预热 IndexCache | `worker.on_startup` | 消除首查冷启动 50~200 ms |
+| **F5** | 向量 float16 落盘 | `preprocess.py` | 向量体积减半 |
+| **F6** | SSE 流式检索 | `POST /search/stream` | 浏览器逐条吐结果，无需等待 Top-K 完成 |
+| **F7** | ensemble 多后端融合 | `POST /search/ensemble` | z-score 归一化 + 加权融合 hnswlib/faiss/brute |
+| **F8** | Anthropic Claude LLM | `LLM_PROVIDER=anthropic` | RAG 第 4 个 LLM provider，支持 Claude Opus |
+
+### v1.1.0 性能优化（perf）
+
+- **P1**：N=100k 大规模真机基准实测，详见 [`docs/benchmark_report.md`](docs/benchmark_report.md)。
+- **P2**：`numba` 加速 BruteBackend 暴力检索，3.15× 提速。
+- **P3**：SQLAlchemy `selectinload` 预加载消除数据集列表 N+1 查询。
+- **P4**：brotli / gzip 响应压缩中间件，大 JSON 响应体减少 70%+。
+
+### v1.1.0 前端瘦身（B1/B2/B3）
+
+- **B1**：`plotly-basic-dist-min` 替换全量 plotly，包体 4.47 MB → 1.07 MB（-76%）。
+- **B2**：移动端 Drawer 响应式布局。
+- **B3**：全站 Loading skeleton 替换 spin，骨架屏体验。
 
 ## 实测性能（liver.h5ad 真实数据集）
 
@@ -215,11 +248,11 @@ uv run arq app.tasks.worker.WorkerSettings
 ## 演示资源
 
 - **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（2 分 42 秒，1440×900，自动化 Playwright 录制 + macOS Tingting 中文配音）。
-- **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（18 张幻灯片，Marp Markdown 一键生成）。
+- **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（**25 张**幻灯片，含 v1.1 演进 4 张专题页；Marp Markdown 一键生成）。
 - **配音讲稿**：[`docs/slides/speaker_notes.md`](docs/slides/speaker_notes.md)
 - **端到端测试脚本**：[`e2e/test_liver_e2e.py`](e2e/test_liver_e2e.py)（注入 1.3 GB liver.h5ad 全流程验证） · [`e2e/demo_video.py`](e2e/demo_video.py)（视频自动录制）
 - **D2 Playwright 流程测试**（共享 [`e2e/conftest.py`](e2e/conftest.py)）：[`test_admin_e2e.py`](e2e/test_admin_e2e.py)（/admin/users CRUD + 重置密码） · [`test_upload_progress_e2e.py`](e2e/test_upload_progress_e2e.py)（双进度条 + threading 高频轮询） · [`test_stats_e2e.py`](e2e/test_stats_e2e.py)（评测后 SearchLog Dashboard） · [`test_rag_e2e.py`](e2e/test_rag_e2e.py)（自然语言查询 + hits 表格）；任一文件均支持 `cd backend && uv run python ../e2e/test_xxx_e2e.py` 或 `uv run pytest ../e2e/`。
-- **9 张实测截图**：[`docs/e2e_screenshots/`](docs/e2e_screenshots/)
+- **14 张实测截图**：[`docs/e2e_screenshots/`](docs/e2e_screenshots/)（覆盖登录 / 上传 / 数据集 / 索引 / 检索 / 评测 / RAG / 可视化 / 多数据集 / Admin / SearchLog Dashboard / IndexDetail）。
 
 ## 业务页面预览（liver.h5ad 真实数据）
 
@@ -250,6 +283,20 @@ uv run arq app.tasks.worker.WorkerSettings
   <td align="center">
     <a href="docs/e2e_screenshots/09_rag.png"><img src="docs/e2e_screenshots/09_rag.png" alt="RAG 自然语言查询"/></a><br/>
     <sub>RAG · 中文提问 · AI 解析 → ANN → 总结</sub>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <a href="docs/e2e_screenshots/12_admin.png"><img src="docs/e2e_screenshots/12_admin.png" alt="管理员用户管理"/></a><br/>
+    <sub>v1.1 · Admin 用户管理 · CRUD + 重置密码</sub>
+  </td>
+  <td align="center">
+    <a href="docs/e2e_screenshots/13_search_log_dashboard.png"><img src="docs/e2e_screenshots/13_search_log_dashboard.png" alt="SearchLog Dashboard"/></a><br/>
+    <sub>v1.1 · SearchLog Dashboard · 24h 滚动统计</sub>
+  </td>
+  <td align="center">
+    <a href="docs/e2e_screenshots/14_index_detail.png"><img src="docs/e2e_screenshots/14_index_detail.png" alt="索引详情页"/></a><br/>
+    <sub>v1.1 · IndexDetail · IndexCache 命中率 + 最近评测</sub>
   </td>
 </tr>
 </table>
@@ -320,12 +367,35 @@ A：告诉 Cursor agent "stop polish loop" 或者手动 `pkill -f 'AGENT_LOOP_TI
 | 开发文档 — 系统测试 | [`docs/03_系统测试.md`](docs/03_系统测试.md) | ✅ |
 | 开发文档 — 项目管理 | [`docs/04_项目管理.md`](docs/04_项目管理.md) | ✅ |
 | 开发文档 — 用户手册 | [`docs/05_用户手册.md`](docs/05_用户手册.md) | ✅ |
-| API 接口文档 | [`docs/06_API接口文档.md`](docs/06_API接口文档.md) | ✅ |
-| 性能基准报告 | [`docs/benchmark_report.md`](docs/benchmark_report.md) | ✅ |
-| 答辩 PPT (PDF/PPTX) | [`docs/slides/`](docs/slides/) | ✅ |
-| 演示视频 | [`docs/video/demo_final.mp4`](docs/video/demo_final.mp4) | ✅ |
-| 端到端测试 | [`e2e/`](e2e/) | ✅ |
+| API 接口文档（31+ 接口） | [`docs/06_API接口文档.md`](docs/06_API接口文档.md) | ✅ |
+| 性能基准报告（含 N=100k） | [`docs/benchmark_report.md`](docs/benchmark_report.md) | ✅ |
+| 答辩 PPT (PDF/PPTX, 25 张) | [`docs/slides/`](docs/slides/) | ✅ |
+| 演示视频 (2'42") | [`docs/video/demo_final.mp4`](docs/video/demo_final.mp4) | ✅ |
+| 端到端测试 (5 个 Playwright 脚本) | [`e2e/`](e2e/) | ✅ |
 | CI/CD | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | ✅ |
+| 更新日志 (v1.0.0 / v1.1.0) | [`CHANGELOG.md`](CHANGELOG.md) | ✅ |
+| 提交物清单 | [`submission/MANIFEST.md`](submission/MANIFEST.md) | ✅ |
+
+### v1.1.0 新增交付（增量）
+
+| 类别 | 路径 / 接口 | 说明 |
+| --- | --- | --- |
+| F1 批量检索 | `POST /api/v1/search/batch` | 一次最多 64 查询 + Redis 缓存复用 |
+| F2 Redis 缓存 | `backend/app/services/search/cache.py` + `GET /search/cache/stats` | 命中率 metrics |
+| F3/F5 mmap + fp16 | `IndexCache.load_index` | 内存与磁盘双减半 |
+| F4 启动预热 | `worker.on_startup` | 消除首查冷启动 |
+| F6 SSE 流式 | `POST /api/v1/search/stream` | 浏览器 SSE 逐条吐结果 |
+| F7 ensemble 融合 | `POST /api/v1/search/ensemble` | z-score 多后端融合 |
+| F8 Anthropic LLM | `LLM_PROVIDER=anthropic` | Claude Opus 接入 RAG |
+| C1 IndexCache stats | `GET /api/v1/indexes/cache/stats` | LRU 命中率 |
+| C3 数据集重命名 | `PATCH /api/v1/datasets/{id}` | 新接口 |
+| C4 索引视角评测 | `GET /api/v1/indexes/{id}/latest-benchmark` | 索引页直读最近评测 |
+| Vitest 单测 | `frontend/src/**/*.test.ts*` | 42 用例 |
+| E2E 流程 (D2) | `e2e/test_{admin,upload_progress,stats,rag}_e2e.py` | +4 个 Playwright 流程 |
+| 架构图 (A1) | `docs/assets/architecture/*.{png,svg}` | 6 张 mermaid 导出 |
+| PPT v2 (A3) | `docs/slides/answer_defense.{md,pdf,pptx}` | 21 → 25 张 |
+| Troubleshooting + FAQ (A4) | `README.md` § 故障排查 / 常见问题 | 16 个常见问题 |
+| benchmark N=100k (P1) | `docs/benchmark_report.md` | 大规模真机实测 |
 
 ## 常用命令
 
