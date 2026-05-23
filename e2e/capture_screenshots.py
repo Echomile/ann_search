@@ -146,6 +146,75 @@ def search_demo(page: Page, cell_id: str) -> None:
     shot(page, "07_search_result")
 
 
+def multi_dataset_demo(page: Page, ds_info: dict, cell_id: str) -> None:
+    """多数据集联合检索 tab：填表 → 发起检索 → 截图（含 "来源数据集" 列）。
+
+    通过前端真实交互演示 C5 加分项：在当前已就绪数据集列表里挑选若干（仅一个
+    时即选择自身）作为参与检索集合，把它当作 ``source_dataset_id``，并复用
+    上一步 ``search_demo`` 拿到的 ``cell_id`` 触发跨集检索。
+    """
+    page.get_by_role("tab", name="多数据集联合").click()
+    page.wait_for_timeout(1200)
+    # Ant Design Tabs 默认不卸载旧 panel，需把后续 locator scope 在 active pane 内
+    panel = page.locator(".ant-tabs-tabpane-active").first
+
+    ready_ds = page.evaluate(
+        """async () => {
+            const token = localStorage.getItem('ann_search_token');
+            const list = await (await fetch('/api/v1/datasets', {headers: {Authorization: `Bearer ${token}`}})).json();
+            return list.filter(d => d.status === 'ready').map(d => ({id: d.id, name: d.name}));
+        }"""
+    )
+    print(f"[info] multi-dataset: {len(ready_ds)} ready dataset(s) -> {ready_ds}")
+
+    # 参与检索的数据集（多选 Select，panel 内第 1 个 selector）
+    multi_select = panel.locator(".ant-select-selector").nth(0)
+    multi_select.click()
+    page.wait_for_timeout(600)
+    for ds in ready_ds:
+        try:
+            label = f"{ds['name']} (#{ds['id']})"
+            option = page.locator(
+                f".ant-select-item-option:has-text(\"{label}\")"
+            ).first
+            if option.count() > 0:
+                option.click()
+                page.wait_for_timeout(250)
+        except Exception as e:
+            print(f"[warn] 选中数据集 {ds['id']} 失败: {e}")
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    # 源数据集（panel 内第 2 个 selector），默认 currentDataset，已是目标，但仍显式
+    # 选一遍以确保下拉关闭与值生效。
+    source_select = panel.locator(".ant-select-selector").nth(1)
+    source_select.click()
+    page.wait_for_timeout(500)
+    try:
+        target_opt = page.locator(
+            f".ant-select-item-option:has-text(\"(#{ds_info['id']})\")"
+        ).first
+        if target_opt.count() > 0:
+            target_opt.click()
+            page.wait_for_timeout(300)
+    except Exception:
+        pass
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(400)
+
+    panel.get_by_placeholder("该 cell_id 须存在于所选源数据集中").fill(cell_id)
+    page.wait_for_timeout(400)
+
+    panel.get_by_role("button", name="发起检索").click()
+    page.wait_for_selector("table tbody tr", timeout=30_000)
+    page.wait_for_timeout(1500)
+    page.evaluate(
+        "document.querySelector('.ant-card-head-title')?.scrollIntoView({behavior: 'instant', block: 'start'})"
+    )
+    page.wait_for_timeout(800)
+    shot(page, "11_multi_dataset", full_page=True)
+
+
 def visualization_demo(page: Page, cell_id: str) -> None:
     """可视化页：填 cell_id → 点击渲染散点图 → 等 Plotly 图绘出 → 截图。"""
     page.get_by_role("menuitem", name="可视化").click()
@@ -265,6 +334,7 @@ def main() -> int:
             cell_id = pick_cell_id(page, ds_info, idx_info)
 
             search_demo(page, cell_id)
+            multi_dataset_demo(page, ds_info, cell_id)
             visualization_demo(page, cell_id)
             evaluation_demo(page, ds_info, idx_info)
             rag_demo(page)

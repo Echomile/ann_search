@@ -33,6 +33,9 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from make_video_cards import wrap_with_intro_outro  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 VIDEO_DIR = ROOT / "docs" / "video"
 NARR_DIR = VIDEO_DIR / "narration"
@@ -483,9 +486,13 @@ def main() -> int:
     video = run_browser_recording(durations)
     print(f"  -> {video}")
 
-    print("[4/4] 合并视频 + 音轨 ...")
+    print("[4/5] 合并视频 + 音轨 ...")
     final = VIDEO_DIR / "demo_final.mp4"
     merge_video_audio(video, full_audio, final)
+    print(f"  -> {final}")
+
+    print("[5/5] 拼接片头 / 片尾静态卡片 ...")
+    wrap_with_intro_outro(final, video_dir=VIDEO_DIR, duration_s=3)
     print(f"  完成 -> {final}")
     return 0
 
