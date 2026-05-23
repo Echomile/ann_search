@@ -25,11 +25,13 @@ instance/
 *.npz
 *.csv
 
-# project data
+# project data（包含 backend/data/raw/, backend/data/processed/ 等运行时产物）
 data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+backend/data/
+backend/indexes/
 
 # ANN indexes
 indexes/*

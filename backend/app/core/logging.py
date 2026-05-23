@@ -37,7 +37,7 @@ def setup_logging(level: str = "INFO") -> None:
             "loggers": {
                 "uvicorn": {"level": level, "handlers": ["console"], "propagate": False},
                 "uvicorn.error": {"level": level, "handlers": ["console"], "propagate": False},
-                "uvicorn.access": {"level": "WARNING", "handlers": ["console"], "propagate": False},
+                "uvicorn.access": {"level": "INFO", "handlers": ["console"], "propagate": False},
                 "sqlalchemy.engine": {"level": "WARNING", "handlers": ["console"], "propagate": False},
             },
         }

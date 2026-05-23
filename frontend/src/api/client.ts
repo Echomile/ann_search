@@ -18,6 +18,14 @@ httpClient.interceptors.request.use(
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // FormData / URLSearchParams 等 body 必须由浏览器自动生成 Content-Type
+    // （含 multipart boundary），不能用 instance 默认的 application/json。
+    if (
+      config.headers &&
+      (config.data instanceof FormData || config.data instanceof URLSearchParams)
+    ) {
+      delete config.headers['Content-Type'];
+    }
     return config;
   },
   (error) => Promise.reject(error),
