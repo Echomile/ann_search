@@ -110,5 +110,8 @@ jobs:
       - name: Type check
         run: pnpm run typecheck --if-present
 
+      - name: Unit tests (Vitest)
+        run: pnpm test
+
       - name: Build
         run: pnpm run build
