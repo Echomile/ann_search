@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
@@ -34,6 +35,15 @@ export default defineConfig({
           vendor: ['react', 'react-dom', 'react-router-dom', 'zustand', 'axios'],
         },
       },
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    coverage: {
+      reporter: ['text', 'html'],
+      exclude: ['src/**/*.test.*', 'src/**/index.ts'],
     },
   },
 });
