@@ -7,8 +7,11 @@
     4. 可视化页：选数据集 + cell_id → 截图带散点图
     5. 评测页：点击"运行评测" → 等待历史列表出现 → 截图
     6. RAG 页：输入提问 → 点击发送 → 等待 AI 回复出现 → 截图
+    7. 管理员-用户管理页：点击「用户管理」菜单 → 等表格 → 全屏截图
+    8. 评测页底部「检索日志统计」Dashboard：滚到底部卡片 → 全屏截图
+    9. 索引详情页：跳转 /indexes/:id → 等内容渲染 → 全屏截图
 
-输出：覆盖 docs/e2e_screenshots/ 下的 01-09 张高质量截图。
+输出：覆盖 docs/e2e_screenshots/ 下的 01-14 张高质量截图。
 
 运行：
     cd backend && uv run python ../e2e/capture_screenshots.py
@@ -309,6 +312,69 @@ def rag_demo(page: Page) -> None:
     shot(page, "09_rag", full_page=True)
 
 
+def admin_demo(page: Page) -> None:
+    """管理员-用户管理页：点击「用户管理」菜单 → 等表格 → 全屏截图。
+
+    需要当前登录用户具有 ``role=admin``，菜单项仅在管理员视角下渲染；
+    demo 用户在初始化数据时已被设置为 admin，故无需额外授权。
+    """
+    page.get_by_role("menuitem", name="用户管理").click()
+    page.wait_for_url(f"{BASE_URL}/admin/users")
+    page.wait_for_selector("table tbody tr", timeout=15_000)
+    page.wait_for_timeout(1200)
+    shot(page, "12_admin", full_page=True)
+
+
+def search_log_dashboard_demo(page: Page) -> None:
+    """评测页底部「检索日志统计」Dashboard：进入 /evaluation → 滚到底部卡片 → 截全图。
+
+    Dashboard 区块在评测页最底部，包含 4 个 Statistic、双 Y 轴折线图（最近 24h
+    查询量与延迟）与按数据集聚合表，因此选 ``full_page=True`` 确保全部内容入画。
+    """
+    page.get_by_role("menuitem", name="性能评测").click()
+    page.wait_for_url(f"{BASE_URL}/evaluation")
+    page.wait_for_timeout(2000)
+    page.evaluate(
+        """() => {
+            const cards = Array.from(document.querySelectorAll('.ant-card-head-title'));
+            const target = cards.find(el => (el.textContent || '').includes('检索日志统计'));
+            if (target) target.scrollIntoView({behavior: 'instant', block: 'start'});
+        }"""
+    )
+    page.wait_for_timeout(2000)
+    shot(page, "13_search_log_dashboard", full_page=True)
+
+
+def index_detail_demo(page: Page) -> None:
+    """索引详情页 /indexes/:id：主动重新查一个 ready 索引 id → 跳转 → 全屏截图。
+
+    重新查询而非沿用 ``ensure_index`` 返回的 ``idx_info``，以避免并发跑的 e2e
+    测试在中途清理临时数据集，导致旧 id 已被级联删除从而渲染「未找到该索引」。
+    """
+    target_id = page.evaluate(
+        """async () => {
+            const token = localStorage.getItem('ann_search_token');
+            const headers = {Authorization: `Bearer ${token}`};
+            const datasets = await (await fetch('/api/v1/datasets', {headers})).json();
+            for (const ds of datasets) {
+                if (ds.status !== 'ready') continue;
+                const list = await (await fetch(`/api/v1/datasets/${ds.id}/indexes`, {headers})).json();
+                if (!Array.isArray(list)) continue;
+                const ready = list.find(x => x.status === 'ready');
+                if (ready) return ready.id;
+            }
+            return null;
+        }"""
+    )
+    assert target_id, "需要至少一个 status=ready 的索引才能截图详情页"
+    print(f"[info] index detail target id={target_id}")
+    page.goto(f"{BASE_URL}/indexes/{target_id}")
+    page.wait_for_load_state("networkidle")
+    page.wait_for_selector(".ant-descriptions", timeout=20_000)
+    page.wait_for_timeout(2000)
+    shot(page, "14_index_detail", full_page=True)
+
+
 def datasets_demo(page: Page) -> None:
     """数据集页：导航 + 截图（含已就绪的 liver）。"""
     page.get_by_role("menuitem", name="数据集").click()
@@ -338,6 +404,9 @@ def main() -> int:
             visualization_demo(page, cell_id)
             evaluation_demo(page, ds_info, idx_info)
             rag_demo(page)
+            admin_demo(page)
+            search_log_dashboard_demo(page)
+            index_detail_demo(page)
 
             print("[done] 截图全部完成")
             return 0
