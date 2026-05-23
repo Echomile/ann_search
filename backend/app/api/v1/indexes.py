@@ -216,6 +216,21 @@ async def get_index_status(
 
 
 @router.get(
+    "/indexes/cache/stats",
+    summary="索引缓存命中率",
+    description=(
+        "返回进程内 :class:`IndexCache` 的命中率与计数器："
+        " ``capacity / size / hits / misses / loads / evictions / hit_ratio / cached_index_ids``。"
+        "用于观测 ANN 索引常驻缓存的效果，命中率长期低意味着工作集大于 capacity 应调大。"
+        "鉴权：当前登录用户均可读（无敏感信息）。"
+    ),
+)
+async def get_cache_stats(current_user: CurrentUser) -> dict[str, Any]:  # noqa: ARG001
+    """返回 :class:`IndexCache` 命中率与内部计数。"""
+    return IndexCache.instance().stats()
+
+
+@router.get(
     "/indexes/{index_id}/latest-benchmark",
     summary="索引最近一次评测结果",
     description=(

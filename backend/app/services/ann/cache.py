@@ -43,6 +43,11 @@ class IndexCache:
         self.capacity = int(capacity)
         self._cache: OrderedDict[int, IndexBackend] = OrderedDict()
         self._lock = asyncio.Lock()
+        # 命中率统计：hits 已加载命中、misses 触发加载、evictions LRU 淘汰、loads 累计加载次数
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+        self._loads = 0
 
     @classmethod
     def instance(cls, capacity: int = 4) -> IndexCache:
@@ -75,8 +80,10 @@ class IndexCache:
         async with self._lock:
             if index_id in self._cache:
                 self._cache.move_to_end(index_id)
+                self._hits += 1
                 return self._cache[index_id]
 
+            self._misses += 1
             record = await db.get(IndexRecord, index_id)
             if record is None:
                 raise LookupError(f"索引不存在: id={index_id}")
@@ -94,10 +101,12 @@ class IndexCache:
                 record.index_path,
             )
             backend.load(record.index_path)
+            self._loads += 1
 
             self._cache[index_id] = backend
             if len(self._cache) > self.capacity:
                 evicted_id, _ = self._cache.popitem(last=False)
+                self._evictions += 1
                 logger.info("缓存已满，淘汰 index_id=%s", evicted_id)
             return backend
 
@@ -108,11 +117,36 @@ class IndexCache:
             index_id: 索引 ID。不存在时静默忽略。
         """
         if self._cache.pop(index_id, None) is not None:
+            self._evictions += 1
             logger.info("手动驱逐缓存 index_id=%s", index_id)
 
     def clear(self) -> None:
-        """清空整个缓存。"""
+        """清空整个缓存（含计数器重置）。"""
         self._cache.clear()
+        self._hits = 0
+        self._misses = 0
+        self._evictions = 0
+        self._loads = 0
+
+    def stats(self) -> dict[str, float | int | list[int]]:
+        """返回缓存命中率与内部计数。
+
+        Returns:
+            dict: 包含 ``capacity / size / hits / misses / loads / evictions /
+                hit_ratio / cached_index_ids`` 字段，可直接序列化为 JSON 暴露给监控接口。
+        """
+        total = self._hits + self._misses
+        hit_ratio = (self._hits / total) if total > 0 else 0.0
+        return {
+            "capacity": self.capacity,
+            "size": len(self._cache),
+            "hits": self._hits,
+            "misses": self._misses,
+            "loads": self._loads,
+            "evictions": self._evictions,
+            "hit_ratio": round(hit_ratio, 4),
+            "cached_index_ids": list(self._cache.keys()),
+        }
 
 
 def get_index_cache() -> IndexCache:
