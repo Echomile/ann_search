@@ -57,6 +57,10 @@
 
 ## 系统架构
 
+![系统架构](docs/assets/architecture/system_overview.png)
+
+> 完整架构图集合（含用例图 / 总体架构 / 检索流水线 / ER / 任务状态机）见 [`docs/assets/architecture/`](docs/assets/architecture/)；mermaid 源代码块保留在文档内便于在线编辑。
+
 ```mermaid
 flowchart LR
   subgraph Client[浏览器 / 前端]

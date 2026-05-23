@@ -82,3 +82,4 @@ docs/video/outro.png
 # submission/ 的归档 zip 不入库（仅保留 MANIFEST.md 索引）
 submission/*.zip
 submission/*.tar.gz
+docs/assets/architecture/*.mmd
