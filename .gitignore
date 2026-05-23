@@ -74,3 +74,7 @@ htmlcov/
 docs/video/demo_screen.webm
 docs/video/narration_full.m4a
 docs/video/narration/
+
+# submission/ 的归档 zip 不入库（仅保留 MANIFEST.md 索引）
+submission/*.zip
+submission/*.tar.gz
