@@ -176,6 +176,7 @@ async def search_by_id(
             top_k=payload.top_k,
             filters=payload.filters,
             metric=record.metric,
+            index_id=record.id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
@@ -229,6 +230,7 @@ async def search_by_vector(
         top_k=payload.top_k,
         filters=payload.filters,
         metric=record.metric,
+        index_id=record.id,
     )
     await _log_search(
         db,

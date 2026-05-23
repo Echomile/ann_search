@@ -401,18 +401,34 @@ async def async_search_by_vector(
     filters: dict[str, Any] | None = None,
     exclude_cell_id: str | None = None,
     metric: str | None = None,
+    index_id: int | None = None,
 ) -> dict[str, Any]:
-    """:func:`search_by_vector` 的异步包装，将计算卸载到默认线程池。"""
-    return await asyncio.to_thread(
-        search_by_vector,
-        query_vector,
-        dataset_dir,
-        backend,
-        top_k,
-        filters,
-        exclude_cell_id,
-        metric,
+    """:func:`search_by_vector` 的异步包装。
+
+    Args:
+        index_id: 可选，提供时启用 F2 Redis 检索结果缓存（同 query+filter+top_k+index_id
+            300s 内命中跳过 ANN 计算）。
+    """
+    from app.services import search_cache  # noqa: PLC0415  内部依赖避免顶部循环
+
+    async def _compute() -> dict[str, Any]:
+        return await asyncio.to_thread(
+            search_by_vector,
+            query_vector,
+            dataset_dir,
+            backend,
+            top_k,
+            filters,
+            exclude_cell_id,
+            metric,
+        )
+
+    if index_id is None:
+        return await _compute()
+    key = search_cache.make_cache_key(
+        index_id=index_id, top_k=top_k, query=query_vector, filters=filters
     )
+    return await search_cache.cached_or_compute(key, _compute)
 
 
 async def async_search_by_cell_id(
@@ -422,17 +438,28 @@ async def async_search_by_cell_id(
     top_k: int = 10,
     filters: dict[str, Any] | None = None,
     metric: str | None = None,
+    index_id: int | None = None,
 ) -> dict[str, Any]:
-    """:func:`search_by_cell_id` 的异步包装。"""
-    return await asyncio.to_thread(
-        search_by_cell_id,
-        query_cell_id,
-        dataset_dir,
-        backend,
-        top_k,
-        filters,
-        metric,
+    """:func:`search_by_cell_id` 的异步包装（带 F2 缓存）。"""
+    from app.services import search_cache  # noqa: PLC0415
+
+    async def _compute() -> dict[str, Any]:
+        return await asyncio.to_thread(
+            search_by_cell_id,
+            query_cell_id,
+            dataset_dir,
+            backend,
+            top_k,
+            filters,
+            metric,
+        )
+
+    if index_id is None:
+        return await _compute()
+    key = search_cache.make_cache_key(
+        index_id=index_id, top_k=top_k, query=query_cell_id, filters=filters
     )
+    return await search_cache.cached_or_compute(key, _compute)
 
 
 def merge_multi_dataset_results(
