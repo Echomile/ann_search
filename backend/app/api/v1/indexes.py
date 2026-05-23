@@ -8,12 +8,15 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, DbSession
+from app.api.v1.evaluation import benchmark_result_path
 from app.models.dataset import Dataset
 from app.models.index_record import IndexRecord
 from app.schemas.common import Message
@@ -210,6 +213,30 @@ async def get_index_status(
         build_time_seconds=record.build_time_seconds,
         memory_mb=record.memory_mb,
     )
+
+
+@router.get(
+    "/indexes/{index_id}/latest-benchmark",
+    summary="索引最近一次评测结果",
+    description=(
+        "从索引视角读取 ``benchmark_index_task`` 落盘的最近一次评测 JSON。"
+        "和 ``GET /evaluation/{index_id}/latest`` 等价，但走 indexes 路由方便前端在索引详情页直接调用。"
+        "索引不存在或非拥有者返回 404；尚未评测返回 ``{has_benchmark: false}`` + 200。"
+    ),
+)
+async def get_index_latest_benchmark(
+    index_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> dict[str, Any]:
+    """读取索引的最近一次评测结果（无评测时降级而非 404）。"""
+    record, _ = await _get_owned_index(db, index_id, current_user.id)
+    path = benchmark_result_path(record.id)
+    if not os.path.exists(path):
+        return {"index_id": record.id, "has_benchmark": False, "result": None}
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    return {"index_id": record.id, "has_benchmark": True, "result": data}
 
 
 @router.delete(
