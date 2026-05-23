@@ -19,8 +19,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { DeleteOutlined, ReloadOutlined } from '@ant-design/icons';
-import axios from 'axios';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { indexesApi } from '@/api/indexes';
 import type {
   DistanceMetric,
@@ -31,6 +30,7 @@ import type {
 } from '@/types/indexRecord';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDateTime, formatMemoryMb, formatSeconds, indexStatusColor } from '@/utils/format';
+import { extractError } from '@/utils/error';
 import { usePolling } from '@/hooks/usePolling';
 
 const { Title, Paragraph, Text } = Typography;
@@ -82,17 +82,8 @@ interface BuildFormValues {
   params: Record<string, number>;
 }
 
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
-
 const IndexManagePage = () => {
+  const navigate = useNavigate();
   const currentDataset = useDatasetStore((s) => s.currentDataset);
   const currentIndex = useDatasetStore((s) => s.currentIndex);
   const setCurrentIndex = useDatasetStore((s) => s.setCurrentIndex);
@@ -426,6 +417,10 @@ const IndexManagePage = () => {
             columns={columns}
             dataSource={indexes}
             pagination={{ pageSize: 10 }}
+            onRow={(record) => ({
+              onClick: () => navigate(`/indexes/${record.id}`),
+              style: { cursor: 'pointer' },
+            })}
             rowClassName={(record) =>
               currentIndex?.id === record.id ? 'ant-table-row-selected' : ''
             }
