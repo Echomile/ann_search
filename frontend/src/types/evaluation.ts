@@ -43,3 +43,27 @@ export interface BenchmarkSummary {
   recalls: Record<string, number>;
   finished_at: string | null;
 }
+
+// 检索日志统计相关类型，严格 snake_case 对齐后端 /api/v1/stats/search
+
+export interface DatasetStat {
+  dataset_id: number;
+  dataset_name: string | null;
+  total_queries: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+}
+
+export interface HourlyBucket {
+  hour_iso: string;
+  queries: number;
+  avg_latency_ms: number;
+}
+
+export interface SearchStats {
+  total_queries: number;
+  overall_avg_latency_ms: number;
+  overall_p95_latency_ms: number;
+  by_dataset: DatasetStat[];
+  hourly_24h: HourlyBucket[];
+}

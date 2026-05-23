@@ -4,9 +4,10 @@ import type {
   BenchmarkResult,
   BenchmarkSummary,
   BenchmarkTaskHandle,
+  SearchStats,
 } from '@/types/evaluation';
 
-// 索引评测 API
+// 索引评测 + 检索日志统计 API
 export const evaluationApi = {
   run: async (payload: BenchmarkRequest): Promise<BenchmarkTaskHandle> => {
     const { data } = await httpClient.post<BenchmarkTaskHandle>('/evaluation/run', payload);
@@ -22,6 +23,11 @@ export const evaluationApi = {
     const { data } = await httpClient.get<BenchmarkSummary[]>('/evaluation/results', {
       params: datasetId !== undefined ? { dataset_id: datasetId } : undefined,
     });
+    return data;
+  },
+
+  searchStats: async (): Promise<SearchStats> => {
+    const { data } = await httpClient.get<SearchStats>('/stats/search');
     return data;
   },
 };

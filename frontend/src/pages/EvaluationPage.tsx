@@ -24,7 +24,12 @@ import { indexesApi } from '@/api/indexes';
 import { evaluationApi } from '@/api/evaluation';
 import type { Dataset } from '@/types/dataset';
 import type { IndexRecord } from '@/types/indexRecord';
-import type { BenchmarkResult, BenchmarkSummary } from '@/types/evaluation';
+import type {
+  BenchmarkResult,
+  BenchmarkSummary,
+  DatasetStat,
+  SearchStats,
+} from '@/types/evaluation';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDateTime, formatMemoryMb, formatSeconds } from '@/utils/format';
 import { extractError } from '@/utils/error';
@@ -54,6 +59,8 @@ const EvaluationPage = () => {
   const [loadingResult, setLoadingResult] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchStats, setSearchStats] = useState<SearchStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const [form] = Form.useForm<FormValues>();
   const watchedDatasetId = Form.useWatch('dataset_id', form);
 
@@ -104,10 +111,23 @@ const EvaluationPage = () => {
     }
   }, []);
 
+  const loadSearchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const stats = await evaluationApi.searchStats();
+      setSearchStats(stats);
+    } catch (err) {
+      message.error(extractError(err));
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void loadDatasets();
     void loadHistory();
-  }, [loadDatasets, loadHistory]);
+    void loadSearchStats();
+  }, [loadDatasets, loadHistory, loadSearchStats]);
 
   useEffect(() => {
     if (!currentDataset) return;
@@ -256,6 +276,62 @@ const EvaluationPage = () => {
       },
     ];
   }, [selectedResult]);
+
+  const hourlyTraces = useMemo<PlotlyData>(() => {
+    if (!searchStats) return [];
+    const xs = searchStats.hourly_24h.map((b) => b.hour_iso);
+    return [
+      {
+        x: xs,
+        y: searchStats.hourly_24h.map((b) => b.queries),
+        type: 'bar',
+        name: '查询数',
+        marker: { color: '#1677ff' },
+        yaxis: 'y',
+      },
+      {
+        x: xs,
+        y: searchStats.hourly_24h.map((b) => b.avg_latency_ms),
+        type: 'scatter',
+        mode: 'lines+markers',
+        name: '平均延迟 (ms)',
+        line: { color: '#fa8c16' },
+        yaxis: 'y2',
+      },
+    ];
+  }, [searchStats]);
+
+  const statsColumns: ColumnsType<DatasetStat> = [
+    {
+      title: '数据集',
+      key: 'dataset',
+      render: (_: unknown, record) =>
+        record.dataset_name ? `${record.dataset_name} (#${record.dataset_id})` : `#${record.dataset_id}`,
+    },
+    {
+      title: '总查询数',
+      dataIndex: 'total_queries',
+      key: 'total_queries',
+      width: 120,
+      sorter: (a, b) => a.total_queries - b.total_queries,
+    },
+    {
+      title: '平均延迟',
+      dataIndex: 'avg_latency_ms',
+      key: 'avg_latency_ms',
+      width: 140,
+      render: (v: number) => `${v.toFixed(2)} ms`,
+      sorter: (a, b) => a.avg_latency_ms - b.avg_latency_ms,
+    },
+    {
+      title: 'P95 延迟',
+      dataIndex: 'p95_latency_ms',
+      key: 'p95_latency_ms',
+      width: 140,
+      render: (v: number) => `${v.toFixed(2)} ms`,
+      sorter: (a, b) => a.p95_latency_ms - b.p95_latency_ms,
+    },
+  ];
 
   return (
     <div>
@@ -428,6 +504,91 @@ const EvaluationPage = () => {
                 </Card>
               </Col>
             </Row>
+          </>
+        )}
+      </Card>
+
+      <Card
+        title="检索日志统计"
+        loading={statsLoading}
+        style={{ marginTop: 24 }}
+        extra={
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => loadSearchStats()}
+            loading={statsLoading}
+          >
+            刷新
+          </Button>
+        }
+      >
+        {searchStats === null ? (
+          <Alert
+            type="info"
+            showIcon
+            message="尚无统计数据"
+            description="完成一次相似检索后此处将自动汇总历史日志。"
+          />
+        ) : (
+          <>
+            <Row gutter={16} style={{ marginBottom: 24 }}>
+              <Col xs={12} md={6}>
+                <Statistic title="总查询数" value={searchStats.total_queries} />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic
+                  title="平均延迟"
+                  value={searchStats.overall_avg_latency_ms.toFixed(2)}
+                  suffix="ms"
+                />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic
+                  title="P95 延迟"
+                  value={searchStats.overall_p95_latency_ms.toFixed(2)}
+                  suffix="ms"
+                />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic title="数据集数" value={searchStats.by_dataset.length} />
+              </Col>
+            </Row>
+
+            <Card type="inner" title="最近 24h 查询量与延迟" style={{ marginBottom: 16 }}>
+              {searchStats.total_queries === 0 ? (
+                <Empty description="近 24h 无查询" />
+              ) : (
+                <PlotlyChart
+                  data={hourlyTraces}
+                  layout={{
+                    xaxis: { title: { text: 'hour (UTC)' }, type: 'date' },
+                    yaxis: { title: { text: '查询数' }, rangemode: 'tozero' },
+                    yaxis2: {
+                      title: { text: '平均延迟 (ms)' },
+                      overlaying: 'y',
+                      side: 'right',
+                      rangemode: 'tozero',
+                    },
+                    barmode: 'group',
+                  }}
+                  height={320}
+                />
+              )}
+            </Card>
+
+            <Card type="inner" title="按数据集聚合">
+              {searchStats.by_dataset.length === 0 ? (
+                <Empty description="尚无任一数据集的查询日志" />
+              ) : (
+                <Table<DatasetStat>
+                  rowKey={(r) => String(r.dataset_id)}
+                  columns={statsColumns}
+                  dataSource={searchStats.by_dataset}
+                  pagination={false}
+                  size="small"
+                />
+              )}
+            </Card>
           </>
         )}
       </Card>
