@@ -13,6 +13,7 @@ import {
   Space,
   Table,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
@@ -264,14 +265,18 @@ const IndexManagePage = () => {
       title: '参数',
       dataIndex: 'params',
       key: 'params',
+      width: 220,
       render: (params: IndexParams | null) => {
         if (!params || Object.keys(params).length === 0) return <Text type="secondary">-</Text>;
+        const text = Object.entries(params)
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ');
         return (
-          <Text code style={{ fontSize: 12 }}>
-            {Object.entries(params)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(', ')}
-          </Text>
+          <Tooltip title={text}>
+            <Text code style={{ fontSize: 12 }} ellipsis>
+              {text}
+            </Text>
+          </Tooltip>
         );
       },
     },
