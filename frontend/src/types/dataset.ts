@@ -32,3 +32,12 @@ export interface DatasetDeleteResponse {
   deleted: boolean;
   dataset_id: number;
 }
+
+export interface UmapResponse {
+  dataset_id: number;
+  has_umap: boolean;
+  coords: number[][] | null;
+  cell_ids: string[] | null;
+  sampled: boolean;
+  total_cells: number;
+}

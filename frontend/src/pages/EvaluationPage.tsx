@@ -18,7 +18,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ExperimentOutlined, ReloadOutlined } from '@ant-design/icons';
-import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
@@ -28,6 +27,7 @@ import type { IndexRecord } from '@/types/indexRecord';
 import type { BenchmarkResult, BenchmarkSummary } from '@/types/evaluation';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDateTime, formatMemoryMb, formatSeconds } from '@/utils/format';
+import { extractError } from '@/utils/error';
 import PlotlyChart, { type PlotlyData } from '@/components/PlotlyChart';
 
 const { Title, Paragraph, Text } = Typography;
@@ -42,16 +42,6 @@ interface FormValues {
 
 const DEFAULT_TOP_K = [10, 100];
 const DEFAULT_CONCURRENCY = [1, 4, 8, 16];
-
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
 
 const EvaluationPage = () => {
   const currentDataset = useDatasetStore((s) => s.currentDataset);

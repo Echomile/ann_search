@@ -16,7 +16,6 @@ import {
   message,
 } from 'antd';
 import { DotChartOutlined } from '@ant-design/icons';
-import axios from 'axios';
 import { Link } from 'react-router-dom';
 import { datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
@@ -25,6 +24,7 @@ import type { Dataset } from '@/types/dataset';
 import type { IndexRecord } from '@/types/indexRecord';
 import type { SearchHit, SearchResponse } from '@/types/search';
 import { useDatasetStore } from '@/store/datasetStore';
+import { extractError } from '@/utils/error';
 import PlotlyChart, { type PlotlyData } from '@/components/PlotlyChart';
 
 const { Title, Paragraph, Text } = Typography;
@@ -35,16 +35,6 @@ interface FormValues {
   cell_id: string;
   top_k: number;
 }
-
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
 
 // 把命中按 distance 升序排列后投射到 2D 平面：
 // 半径用 distance 归一化，角度用 cell_id 的稳定哈希散开。

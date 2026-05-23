@@ -21,13 +21,14 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons';
-import axios from 'axios';
 import { datasetsApi } from '@/api/datasets';
 import { ragApi } from '@/api/rag';
 import type { Dataset } from '@/types/dataset';
 import type { RagHit, RagResponse } from '@/types/rag';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDuration } from '@/utils/format';
+import { extractError } from '@/utils/error';
+import { renderMetadataTags } from '@/utils/metadata';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -39,34 +40,6 @@ interface ChatEntry {
   response?: RagResponse;
   error?: string;
 }
-
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
-
-const formatMetaValue = (v: unknown): string => {
-  if (v === null || v === undefined) return '-';
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
-};
-
-const renderMetadataTags = (meta: Record<string, unknown> | null | undefined) => {
-  const entries = Object.entries(meta ?? {});
-  if (entries.length === 0) return <Text type="secondary">-</Text>;
-  return (
-    <Space size={[4, 4]} wrap>
-      {entries.map(([k, v]) => (
-        <Tag key={k} color="geekblue">{`${k}: ${formatMetaValue(v)}`}</Tag>
-      ))}
-    </Space>
-  );
-};
 
 const hitColumns: ColumnsType<RagHit> = [
   { title: 'Rank', dataIndex: 'rank', key: 'rank', width: 70 },

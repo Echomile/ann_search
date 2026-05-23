@@ -20,7 +20,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { MinusCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import axios from 'axios';
 import { datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
 import { searchApi } from '@/api/search';
@@ -29,6 +28,7 @@ import type { IndexRecord } from '@/types/indexRecord';
 import type { SearchFilters, SearchHit, SearchResponse } from '@/types/search';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDuration } from '@/utils/format';
+import { extractError } from '@/utils/error';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -62,16 +62,6 @@ interface MultiValues {
   top_k: number;
   filters?: FilterRow[];
 }
-
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
 
 // 将动态过滤项数组转为后端 filters dict；同一 key 多值聚合为数组
 const buildFilters = (rows?: FilterRow[]): SearchFilters | undefined => {

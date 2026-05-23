@@ -27,7 +27,7 @@ const DEFAULT_FONT = {
   color: '#1f1f1f',
 };
 
-const DEFAULT_MARGIN = { l: 48, r: 24, t: 48, b: 48 };
+const DEFAULT_MARGIN = { l: 50, r: 30, t: 40, b: 60 };
 const DEFAULT_CONFIG: Partial<PlotlyConfig> = {
   responsive: true,
   displaylogo: false,
