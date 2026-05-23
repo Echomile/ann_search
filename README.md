@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (2分42秒)</a>
+  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (5分48秒)</a>
   &nbsp;·&nbsp;
   <a href="docs/slides/answer_defense.pdf">查看答辩 PPT</a>
   &nbsp;·&nbsp;
