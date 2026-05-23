@@ -68,6 +68,9 @@ class Step:
         return m4a
 
 
+DEMO_CELL_ID: str | None = None  # 由 step_search_demo 自动填充
+
+
 def step_intro(page: Page) -> None:
     page.goto(f"{BASE_URL}/login")
     page.wait_for_timeout(1500)
@@ -85,16 +88,14 @@ def step_login(page: Page) -> None:
 
 def step_datasets(page: Page) -> None:
     page.get_by_role("menuitem", name="数据集").click()
-    page.wait_for_timeout(2000)
-    # 滚动展示
-    page.mouse.wheel(0, 600)
-    page.wait_for_timeout(2000)
-    page.mouse.wheel(0, -600)
-    page.wait_for_timeout(1000)
+    page.wait_for_timeout(1500)
+    page.evaluate(
+        "document.querySelector('table')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+    )
+    page.wait_for_timeout(1500)
 
 
 def step_select_dataset(page: Page) -> None:
-    # 点击第一行选中
     rows = page.locator("table tbody tr")
     if rows.count() > 0:
         rows.first.click()
@@ -104,6 +105,10 @@ def step_select_dataset(page: Page) -> None:
 def step_indexes(page: Page) -> None:
     page.get_by_role("menuitem", name="索引管理").click()
     page.wait_for_url(f"{BASE_URL}/indexes")
+    page.wait_for_timeout(1500)
+    page.evaluate(
+        "document.querySelector('table')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+    )
     page.wait_for_timeout(2500)
 
 
@@ -114,47 +119,115 @@ def step_search(page: Page) -> None:
 
 
 def step_search_demo(page: Page) -> None:
-    """触发一次真实检索演示。"""
+    """触发一次 UI 真实检索演示并展示结果。"""
+    global DEMO_CELL_ID
+    # 拿到一个真实存在的 cell_id（先 by-vector 拉一条）
     info = page.evaluate(
         """async () => {
             const token = localStorage.getItem('ann_search_token');
             const headers = {Authorization: `Bearer ${token}`};
             const datasets = await (await fetch('/api/v1/datasets', {headers})).json();
             const ds = datasets.find(d => d.status === 'ready');
-            if (!ds) return {error: 'no-dataset'};
             const indexes = await (await fetch(`/api/v1/datasets/${ds.id}/indexes`, {headers})).json();
             const idx = indexes.find(x => x.status === 'ready');
-            if (!idx) return {error: 'no-index'};
             const vec = new Array(ds.vector_dim).fill(0).map(() => Math.random() - 0.5);
             const r = await fetch('/api/v1/search/by-vector', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json', ...headers},
-                body: JSON.stringify({dataset_id: ds.id, index_id: idx.id, vector: vec, top_k: 10}),
+                body: JSON.stringify({dataset_id: ds.id, index_id: idx.id, vector: vec, top_k: 1}),
             });
-            const data = await r.json();
-            return {hits: data.hits?.length, latency: data.latency_ms, first_cell: data.hits?.[0]?.cell_id};
+            const d = await r.json();
+            return d.hits?.[0]?.cell_id;
         }"""
     )
-    print(f"[demo] 检索：{info}")
+    DEMO_CELL_ID = info or "CGACTTCTCCAGGGCT-1_18"
+    print(f"[demo] cell_id={DEMO_CELL_ID}")
+    # UI 操作：填入并发起检索
+    page.get_by_placeholder("例如 AAACATACAACCAC-1").fill(DEMO_CELL_ID)
+    page.wait_for_timeout(800)
+    page.get_by_role("button", name="发起检索").click()
+    page.wait_for_selector("table tbody tr", timeout=20_000)
+    page.wait_for_timeout(1000)
+    page.evaluate("document.querySelector('table')?.scrollIntoView({behavior: 'smooth', block: 'center'})")
     page.wait_for_timeout(2000)
 
 
 def step_visualization(page: Page) -> None:
     page.get_by_role("menuitem", name="可视化").click()
     page.wait_for_url(f"{BASE_URL}/visualization")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(1500)
+    if DEMO_CELL_ID:
+        page.get_by_placeholder("留空则只显示背景点").fill(DEMO_CELL_ID)
+        page.wait_for_timeout(500)
+        page.get_by_role("button", name="渲染散点图").click()
+        try:
+            page.wait_for_selector(".js-plotly-plot .scatterlayer .trace", timeout=15_000)
+        except Exception:
+            pass
+        page.wait_for_timeout(1000)
+        page.evaluate(
+            "document.querySelector('.js-plotly-plot')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+        )
+    page.wait_for_timeout(2000)
 
 
 def step_evaluation(page: Page) -> None:
     page.get_by_role("menuitem", name="性能评测").click()
     page.wait_for_url(f"{BASE_URL}/evaluation")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(1500)
+    # 选索引（必填）
+    try:
+        idx_select = page.locator(".ant-select-selector").nth(1)
+        idx_select.click()
+        page.wait_for_timeout(600)
+        page.locator(".ant-select-item-option").first.click()
+        page.wait_for_timeout(400)
+    except Exception:
+        pass
+    page.get_by_role("button", name="运行评测").click()
+    # 等历史出现，再点查看详情
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        res = page.evaluate(
+            """async () => {
+                const token = localStorage.getItem('ann_search_token');
+                const r = await fetch('/api/v1/evaluation/results', {headers: {Authorization: `Bearer ${token}`}});
+                if (!r.ok) return 0;
+                return (await r.json()).length;
+            }"""
+        )
+        if res and int(res) > 0:
+            break
+        time.sleep(2)
+    try:
+        page.get_by_role("button", name="刷新历史").click()
+        page.wait_for_timeout(1500)
+        page.get_by_role("button", name="查看详情").first.click()
+        page.wait_for_timeout(2500)
+        page.evaluate(
+            "document.querySelectorAll('.js-plotly-plot')[0]?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+        )
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
 
 
 def step_rag(page: Page) -> None:
     page.get_by_role("menuitem", name="RAG").click()
     page.wait_for_url(f"{BASE_URL}/rag")
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(1500)
+    textarea = page.get_by_placeholder("输入自然语言查询，Enter 发送，Shift+Enter 换行")
+    textarea.fill("在肝脏中找出与 hepatocyte 类似的 5 个细胞")
+    page.wait_for_timeout(500)
+    page.get_by_role("button", name="发送").click()
+    try:
+        page.wait_for_function(
+            """() => document.body.innerText.includes('为您找到') || document.querySelectorAll('table tbody tr').length > 0""",
+            timeout=20_000,
+        )
+    except Exception:
+        pass
+    page.wait_for_timeout(2000)
 
 
 def step_outro(page: Page) -> None:
