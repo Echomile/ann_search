@@ -11,6 +11,7 @@ import {
   MessageOutlined,
   UserOutlined,
   LogoutOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 
@@ -22,7 +23,7 @@ interface MenuItem {
   icon: JSX.Element;
 }
 
-const MENU_ITEMS: MenuItem[] = [
+const BASE_MENU_ITEMS: MenuItem[] = [
   { key: '/datasets', label: '数据集', icon: <DatabaseOutlined /> },
   { key: '/indexes', label: '索引管理', icon: <DeploymentUnitOutlined /> },
   { key: '/search', label: '检索', icon: <SearchOutlined /> },
@@ -41,10 +42,20 @@ const Layout = () => {
     token: { colorBgContainer, colorBorderSecondary },
   } = theme.useToken();
 
+  const menuItems = useMemo<MenuItem[]>(
+    () => [
+      ...BASE_MENU_ITEMS,
+      ...(user?.role === 'admin'
+        ? [{ key: '/admin/users', label: '用户管理', icon: <TeamOutlined /> }]
+        : []),
+    ],
+    [user?.role],
+  );
+
   const selectedKey = useMemo(() => {
-    const match = MENU_ITEMS.find((item) => location.pathname.startsWith(item.key));
+    const match = menuItems.find((item) => location.pathname.startsWith(item.key));
     return match ? match.key : '/datasets';
-  }, [location.pathname]);
+  }, [location.pathname, menuItems]);
 
   const handleLogout = () => {
     logout();
@@ -83,7 +94,7 @@ const Layout = () => {
           theme="dark"
           mode="inline"
           selectedKeys={[selectedKey]}
-          items={MENU_ITEMS.map(({ key, label, icon }) => ({ key, label, icon }))}
+          items={menuItems.map(({ key, label, icon }) => ({ key, label, icon }))}
           onClick={({ key }) => navigate(key)}
         />
       </Sider>

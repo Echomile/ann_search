@@ -10,6 +10,7 @@ import IndexManagePage from '@/pages/IndexManagePage';
 import IndexDetailPage from '@/pages/IndexDetailPage';
 import SearchPage from '@/pages/SearchPage';
 import RagChatPage from '@/pages/RagChatPage';
+import AdminUsersPage from '@/pages/AdminUsersPage';
 
 // 重 Plotly 依赖的页面单独懒加载，避免拖慢首屏
 const VisualizationPage = lazy(() => import('@/pages/VisualizationPage'));
@@ -39,6 +40,7 @@ export const router = createBrowserRouter([
       { path: 'visualization', element: withSuspense(<VisualizationPage />) },
       { path: 'evaluation', element: withSuspense(<EvaluationPage />) },
       { path: 'rag', element: <RagChatPage /> },
+      { path: 'admin/users', element: <AdminUsersPage /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

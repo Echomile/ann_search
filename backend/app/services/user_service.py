@@ -6,20 +6,33 @@
 约定：
     - 首个注册的用户自动获得 ``admin`` 角色，便于后续接口管理；
     - 用户名重复时抛出 :class:`ValueError`，由路由层转换为 HTTP 400；
-    - 校验失败统一返回 ``None``，由路由层转换为 HTTP 401。
+    - 校验失败统一返回 ``None``，由路由层转换为 HTTP 401；
+    - 管理员相关函数（``update_user_role`` / ``reset_user_password``）
+      仅完成业务变更，权限校验由路由层 ``get_current_admin`` 负责。
 """
 
 from __future__ import annotations
+
+import secrets
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password, verify_password
+from app.models.dataset import Dataset
 from app.models.user import User
+from app.services import dataset_service
+
+TEMP_PASSWORD_BYTES = 9
 
 
 class UsernameAlreadyExistsError(ValueError):
     """用户名已存在异常。"""
+
+
+class UserNotFoundError(LookupError):
+    """目标用户不存在异常。"""
 
 
 async def get_user_by_id(db: AsyncSession, user_id: int) -> User | None:
@@ -131,19 +144,82 @@ async def authenticate_user(
     return user
 
 
-async def delete_user(db: AsyncSession, user_id: int) -> bool:
-    """按 ID 删除用户。
+async def update_user_role(
+    db: AsyncSession,
+    user_id: int,
+    role: Literal["admin", "user"],
+) -> User:
+    """更新指定用户的角色。
+
+    Args:
+        db: 异步数据库会话。
+        user_id: 目标用户 ID。
+        role: 目标角色，``admin`` 或 ``user``。
+
+    Raises:
+        UserNotFoundError: 目标用户不存在。
+
+    Returns:
+        User: 已 refresh 的用户对象。
+    """
+    user = await get_user_by_id(db, user_id)
+    if user is None:
+        raise UserNotFoundError(f"用户不存在: {user_id}")
+    user.role = role
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def delete_user(db: AsyncSession, user_id: int) -> None:
+    """按 ID 删除用户，并主动清理其名下数据集的磁盘文件。
+
+    Datasets / SearchLog 等关联表通过 ``ON DELETE CASCADE`` 自动随用户删除；
+    但磁盘上的 ``h5ad`` / 向量 / 处理目录 / 索引目录不会被数据库级联清掉，
+    因此本函数会先复用 :func:`dataset_service.delete_dataset` 主动清理。
 
     Args:
         db: 异步数据库会话。
         user_id: 要删除的用户 ID。
 
-    Returns:
-        bool: 命中并删除返回 ``True``，未命中返回 ``False``。
+    Raises:
+        UserNotFoundError: 目标用户不存在。
     """
     user = await get_user_by_id(db, user_id)
     if user is None:
-        return False
+        raise UserNotFoundError(f"用户不存在: {user_id}")
+
+    stmt = select(Dataset).where(Dataset.owner_id == user_id)
+    result = await db.execute(stmt)
+    datasets = list(result.scalars().all())
+    for ds in datasets:
+        await dataset_service.delete_dataset(db, ds)
+
     await db.delete(user)
     await db.commit()
-    return True
+
+
+async def reset_user_password(db: AsyncSession, user_id: int) -> str:
+    """为指定用户重置一个随机密码并落库（明文仅本次返回）。
+
+    使用 :func:`secrets.token_urlsafe(9)` 生成 12 字符 URL-safe 随机串，
+    经 bcrypt 哈希后写入 ``users.password_hash``。
+
+    Args:
+        db: 异步数据库会话。
+        user_id: 目标用户 ID。
+
+    Raises:
+        UserNotFoundError: 目标用户不存在。
+
+    Returns:
+        str: 新生成的明文随机密码，调用方需立即返回给前端并不再持久化。
+    """
+    user = await get_user_by_id(db, user_id)
+    if user is None:
+        raise UserNotFoundError(f"用户不存在: {user_id}")
+    temp_password = secrets.token_urlsafe(TEMP_PASSWORD_BYTES)
+    user.password_hash = hash_password(temp_password)
+    await db.commit()
+    await db.refresh(user)
+    return temp_password
