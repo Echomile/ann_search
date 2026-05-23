@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import desc, select
+from starlette.responses import StreamingResponse
 
 from app.api.deps import CurrentUser, DbSession
 from app.models.dataset import Dataset
@@ -26,7 +29,17 @@ from app.schemas.search import (
 )
 from app.services import search as search_service
 
+try:
+    from sse_starlette.sse import EventSourceResponse  # type: ignore[import-not-found]
+
+    _HAS_SSE_STARLETTE = True
+except ImportError:  # pragma: no cover - 仅在缺少 sse-starlette 时触发
+    EventSourceResponse = None  # type: ignore[assignment]
+    _HAS_SSE_STARLETTE = False
+
 router = APIRouter(prefix="/search", tags=["search"])
+
+_STREAM_PER_HIT_DELAY_SEC = 0.02
 
 
 async def _get_dataset(db: DbSession, dataset_id: int) -> Dataset:
@@ -245,6 +258,166 @@ async def search_by_vector(
         latency_ms=float(result.get("query_time_ms", 0.0)),
     )
     return _build_response(payload.dataset_id, result, payload.top_k)
+
+
+async def _stream_hits_as_sse(
+    *,
+    hits: list[dict[str, Any]],
+    latency_ms: float,
+    total_candidates: int,
+    index_backend: str | None,
+    metric: str | None,
+    dataset_id: int,
+    top_k: int,
+) -> AsyncIterator[dict[str, str]]:
+    """按 rank 顺序生成 SSE 事件。
+
+    每条命中作为 ``event: hit`` 推送，最后追加 ``event: done``。
+    在 hit 之间 sleep ``_STREAM_PER_HIT_DELAY_SEC``，模拟"边算边推"
+    的视觉效果（实际 ANN 已在调用前完成，仅为前端流式体验服务）。
+
+    Args:
+        hits: 已按 rank 排序的命中字典列表（含 ``cell_id`` / ``distance`` / ``meta``）。
+        latency_ms: ANN 端到端耗时（毫秒），随 done 事件回填。
+        total_candidates: 候选总数，随 done 事件回填。
+        index_backend: 索引后端名称，随 done 事件回填。
+        metric: 距离度量名称，随 done 事件回填。
+        dataset_id: 数据集 ID，随 done 事件回填。
+        top_k: 实际返回数量，随 done 事件回填。
+
+    Yields:
+        dict[str, str]: ``{"event": ..., "data": <json-str>}`` 形态的 SSE payload。
+    """
+    for item in hits:
+        yield {
+            "event": "hit",
+            "data": json.dumps(
+                {
+                    "rank": item["rank"],
+                    "cell_id": item["cell_id"],
+                    "distance": float(item["distance"]),
+                    "meta": item.get("meta") or {},
+                    "source_dataset_id": item.get("source_dataset_id"),
+                },
+                ensure_ascii=False,
+            ),
+        }
+        await asyncio.sleep(_STREAM_PER_HIT_DELAY_SEC)
+    yield {
+        "event": "done",
+        "data": json.dumps(
+            {
+                "dataset_id": dataset_id,
+                "top_k": top_k,
+                "latency_ms": float(latency_ms),
+                "total_candidates": int(total_candidates),
+                "index_backend": index_backend,
+                "metric": metric,
+            },
+            ensure_ascii=False,
+        ),
+    }
+
+
+def _events_to_streaming_response(
+    events: AsyncIterator[dict[str, str]],
+) -> StreamingResponse:
+    """``sse-starlette`` 不可用时的纯 ``StreamingResponse`` 兜底实现。
+
+    将 ``{"event": ..., "data": ...}`` 字典序列按 SSE 协议拼成
+    ``event: <name>\\ndata: <payload>\\n\\n`` 文本块。
+    """
+
+    async def _wire() -> AsyncIterator[bytes]:
+        async for ev in events:
+            event = ev.get("event") or "message"
+            data = ev.get("data") or ""
+            yield f"event: {event}\ndata: {data}\n\n".encode()
+
+    return StreamingResponse(
+        _wire(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post(
+    "/by-vector-stream",
+    summary="按向量检索（SSE 流式）",
+    description=(
+        "Server-Sent Events 版 ``by-vector`` 检索：服务端先用 ANN 计算 Top-K hits，"
+        "再按 rank 顺序逐条推送 ``event: hit``，每条间隔约 20ms 以改善前端"
+        "\"等结果出来才刷新\"的卡顿感；最后一条为 ``event: done``，"
+        "携带 ``latency_ms`` / ``total_candidates`` 等汇总信息。"
+        "\n\n"
+        "客户端建议通过 ``fetch + ReadableStream`` 自行解析（``EventSource`` 不支持 POST）。"
+    ),
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "SSE 流：N 条 ``event: hit`` + 1 条 ``event: done``。",
+        },
+        503: {"description": "sse-starlette 不可用且兜底实现也未启用时返回。"},
+    },
+)
+async def search_by_vector_stream(
+    payload: SearchByVector,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> StreamingResponse:
+    """按向量检索 SSE 流式接口。"""
+    dataset = await _get_dataset(db, payload.dataset_id)
+    if dataset.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {payload.dataset_id}"
+        )
+    record = await _get_index_record(db, dataset_id=payload.dataset_id, index_id=payload.index_id)
+    if dataset.vector_dim and len(payload.vector) != dataset.vector_dim:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"向量维度 {len(payload.vector)} 与数据集维度 {dataset.vector_dim} 不一致",
+        )
+    dataset_dir = _resolve_dataset_dir(dataset)
+    backend = search_service.get_index_backend(
+        index_id=record.id,
+        dataset_dir=dataset_dir,
+        backend_name=record.backend,
+        metric=record.metric,
+        dim=dataset.vector_dim,
+        index_path=record.index_path,
+    )
+    result = await search_service.async_search_by_vector(
+        query_vector=payload.vector,
+        dataset_dir=dataset_dir,
+        backend=backend,
+        top_k=payload.top_k,
+        filters=payload.filters,
+        metric=record.metric,
+        index_id=record.id,
+    )
+    latency_ms = float(result.get("query_time_ms", 0.0))
+    await _log_search(
+        db,
+        dataset_id=payload.dataset_id,
+        user_id=current_user.id,
+        top_k=payload.top_k,
+        filters=payload.filters,
+        latency_ms=latency_ms,
+    )
+
+    events = _stream_hits_as_sse(
+        hits=list(result.get("results", [])),
+        latency_ms=latency_ms,
+        total_candidates=int(result.get("total_candidates", 0) or 0),
+        index_backend=result.get("index_backend"),
+        metric=result.get("metric"),
+        dataset_id=payload.dataset_id,
+        top_k=payload.top_k,
+    )
+    if _HAS_SSE_STARLETTE and EventSourceResponse is not None:
+        return EventSourceResponse(events)
+    return _events_to_streaming_response(events)
 
 
 @router.post(

@@ -418,3 +418,103 @@ async def test_batch_search_too_many_returns_400(
     )
     assert resp.status_code == 400, resp.text
     assert "queries" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# F6 SSE 流式 by-vector 检索 API 端到端测试
+# ---------------------------------------------------------------------------
+
+
+def _parse_sse_events(raw: str) -> list[dict[str, str]]:
+    """将 ``\\n\\n`` / ``\\r\\n\\r\\n`` 分隔的 SSE 文本解析为 ``{event, data}`` 列表。
+
+    简化实现：先把 CRLF 归一为 LF，再按空行切块；每块内仅识别 ``event:`` 与
+    ``data:`` 字段，忽略 ``id:`` / ``retry:`` 与以 ``:`` 开头的注释行。同一个块
+    内多行 ``data:`` 按 SSE 规范用 ``\\n`` 拼接。
+    """
+    normalized = raw.replace("\r\n", "\n").replace("\r", "\n")
+    events: list[dict[str, str]] = []
+    blocks = [block for block in normalized.split("\n\n") if block.strip()]
+    for block in blocks:
+        event_name: str | None = None
+        data_lines: list[str] = []
+        for line in block.splitlines():
+            if not line or line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event_name = line[len("event:") :].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:") :].lstrip(" "))
+        events.append({"event": event_name or "message", "data": "\n".join(data_lines)})
+    return events
+
+
+async def test_by_vector_stream(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """SSE 流式 by-vector：应推送 ``top_k`` 个 ``event: hit`` 并以 ``event: done`` 结束。"""
+    ac, headers, dataset_id, index_id = batch_env
+    rng = np.random.default_rng(11)
+    top_k = 5
+    payload = {
+        "dataset_id": dataset_id,
+        "index_id": index_id,
+        "vector": rng.normal(size=_BATCH_DIM).astype(np.float32).tolist(),
+        "top_k": top_k,
+    }
+
+    async with ac.stream(
+        "POST",
+        "/api/v1/search/by-vector-stream",
+        headers=headers,
+        json=payload,
+    ) as resp:
+        assert resp.status_code == 200, await resp.aread()
+        ctype = resp.headers.get("content-type", "")
+        assert "text/event-stream" in ctype, ctype
+        chunks: list[bytes] = []
+        async for chunk in resp.aiter_bytes():
+            chunks.append(chunk)
+    raw = b"".join(chunks).decode("utf-8", errors="replace")
+    events = _parse_sse_events(raw)
+
+    hit_events = [ev for ev in events if ev["event"] == "hit"]
+    done_events = [ev for ev in events if ev["event"] == "done"]
+    assert len(hit_events) == top_k, f"期望 {top_k} 条 hit，实际 {len(hit_events)} | raw={raw!r}"
+    assert len(done_events) == 1, f"期望 1 条 done，实际 {len(done_events)} | raw={raw!r}"
+    assert len(events) >= top_k + 1
+
+    ranks: list[int] = []
+    for ev in hit_events:
+        item = json.loads(ev["data"])
+        assert {"rank", "cell_id", "distance"}.issubset(item.keys())
+        ranks.append(int(item["rank"]))
+    assert ranks == sorted(ranks)
+    assert ranks[0] == 1
+    assert ranks[-1] == top_k
+
+    summary = json.loads(done_events[0]["data"])
+    assert summary["dataset_id"] == dataset_id
+    assert summary["top_k"] == top_k
+    assert summary["latency_ms"] >= 0.0
+    assert summary["total_candidates"] >= top_k
+    assert summary["index_backend"] == "brute"
+
+
+async def test_by_vector_stream_dim_mismatch(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """SSE 流式接口在向量维度不匹配时应返回 422。"""
+    ac, headers, dataset_id, index_id = batch_env
+    bad_payload = {
+        "dataset_id": dataset_id,
+        "index_id": index_id,
+        "vector": [0.1, 0.2, 0.3],
+        "top_k": 5,
+    }
+    resp = await ac.post(
+        "/api/v1/search/by-vector-stream",
+        headers=headers,
+        json=bad_payload,
+    )
+    assert resp.status_code == 422, resp.text
