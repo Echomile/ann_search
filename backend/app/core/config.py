@@ -63,6 +63,11 @@ class Settings(BaseSettings):
         "http://localhost:3000",
     ]
 
+    SEARCH_CACHE_TTL_SECONDS: int = Field(
+        default=300,
+        description="检索结果 Redis 缓存的 TTL（秒），<= 0 时关闭缓存。",
+    )
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, v: object) -> object:
