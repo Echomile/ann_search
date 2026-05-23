@@ -21,6 +21,9 @@ from app.schemas.search import (
     BatchSearchHitGroup,
     BatchSearchRequest,
     BatchSearchResponse,
+    EnsembleHit,
+    EnsembleSearchRequest,
+    EnsembleSearchResponse,
     MultiDatasetSearchRequest,
     SearchByCellId,
     SearchByVector,
@@ -667,4 +670,212 @@ async def search_batch_endpoint(
         index_backend=record.backend,
         metric=record.metric,
         groups=groups,
+    )
+
+
+_ENSEMBLE_MIN_INDEXES = 2
+_ENSEMBLE_MAX_INDEXES = 5
+_ENSEMBLE_OVER_FETCH_FACTOR = 3
+
+
+async def _resolve_query_vector(
+    *,
+    dataset: Dataset,
+    dataset_dir: str,
+    cell_id: str | None,
+    vector: list[float] | None,
+) -> list[float]:
+    """将 ensemble 请求的查询统一解析为向量。
+
+    Args:
+        dataset: 已校验的数据集对象。
+        dataset_dir: 数据集制品目录。
+        cell_id: 查询细胞编号，与 ``vector`` 二选一。
+        vector: 自定义向量。
+
+    Returns:
+        list[float]: 长度等于 ``dataset.vector_dim`` 的查询向量。
+
+    Raises:
+        HTTPException: cell_id 不存在或向量维度不一致时抛出。
+    """
+    if vector is not None:
+        if dataset.vector_dim and len(vector) != dataset.vector_dim:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"向量维度 {len(vector)} 与数据集维度 {dataset.vector_dim} 不一致",
+            )
+        return list(vector)
+    artifacts = search_service.load_dataset_artifacts(dataset_dir)
+    cid_map: dict[str, int] = artifacts["cell_id_to_index"]
+    if cell_id not in cid_map:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"cell_id {cell_id} 不存在于数据集 {dataset.id}",
+        )
+    return artifacts["vectors"][cid_map[cell_id]].tolist()
+
+
+async def _execute_one_ensemble_search(
+    *,
+    dataset: Dataset,
+    record: IndexRecord,
+    dataset_dir: str,
+    query_vector: list[float],
+    top_k: int,
+    filters: dict[str, Any] | None,
+    exclude_cell_id: str | None,
+) -> dict[str, Any]:
+    """ensemble 检索：在解析完元信息后并发执行的单一子任务。
+
+    传入扩大后的 ``top_k * over_fetch`` 以提升合并召回；上层在 merge 阶段再
+    取最终 Top-K。本函数不访问 DB，便于在外层 :func:`asyncio.gather` 中并发。
+    ``exclude_cell_id`` 在以 cell_id 发起查询时传入，用于剔除自身命中。
+    """
+    backend = search_service.get_index_backend(
+        index_id=record.id,
+        dataset_dir=dataset_dir,
+        backend_name=record.backend,
+        metric=record.metric,
+        dim=dataset.vector_dim,
+        index_path=record.index_path,
+    )
+    return await search_service.async_search_by_vector(
+        query_vector=query_vector,
+        dataset_dir=dataset_dir,
+        backend=backend,
+        top_k=top_k,
+        filters=filters,
+        exclude_cell_id=exclude_cell_id,
+        metric=record.metric,
+    )
+
+
+@router.post(
+    "/ensemble",
+    response_model=EnsembleSearchResponse,
+    summary="多后端 ensemble 检索",
+    description=(
+        "对同一数据集并发使用 2~5 个 ``status=ready`` 索引（如 ``hnswlib`` + "
+        "``faiss-ivfpq``）执行检索；每路结果按 z-score 归一化 ``(d-mean)/std`` 后"
+        "再按 ``cell_id`` 聚合：取所有索引中最低（最相似）的归一化分数为 ``score``，"
+        "``voted_by`` 列出命中该 cell 的索引 ID。"
+        "\n\n"
+        "- ``index_ids`` 长度 2~5；少于 2 或大于 5 返回 400；\n"
+        "- 所有 ``index_ids`` 必须同属 ``dataset_id`` 且状态为 ``ready``，否则 400；\n"
+        "- 单路按 ``top_k * 3`` 取候选以提升合并召回，最终输出严格截断到 ``top_k``。"
+    ),
+)
+async def search_ensemble(
+    payload: EnsembleSearchRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> EnsembleSearchResponse:
+    """多后端 ensemble 检索。"""
+    if (
+        len(payload.index_ids) < _ENSEMBLE_MIN_INDEXES
+        or len(payload.index_ids) > _ENSEMBLE_MAX_INDEXES
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"index_ids 数量需在 [{_ENSEMBLE_MIN_INDEXES}, {_ENSEMBLE_MAX_INDEXES}] "
+                f"区间，当前 {len(payload.index_ids)}"
+            ),
+        )
+    if len(set(payload.index_ids)) != len(payload.index_ids):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="index_ids 中存在重复 ID",
+        )
+
+    dataset = await _get_dataset(db, payload.dataset_id)
+    if dataset.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {payload.dataset_id}"
+        )
+
+    records: list[IndexRecord] = []
+    for idx_id in payload.index_ids:
+        record = await db.get(IndexRecord, idx_id)
+        if record is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"索引不存在: {idx_id}"
+            )
+        if record.dataset_id != payload.dataset_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"索引 {idx_id} 不属于数据集 {payload.dataset_id}"
+                    f"（实际 dataset_id={record.dataset_id}）"
+                ),
+            )
+        if record.status != "ready":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"索引 {idx_id} 尚未 ready: {record.status}",
+            )
+        records.append(record)
+
+    dataset_dir = _resolve_dataset_dir(dataset)
+    query_vector = await _resolve_query_vector(
+        dataset=dataset,
+        dataset_dir=dataset_dir,
+        cell_id=payload.query.cell_id,
+        vector=payload.query.vector,
+    )
+
+    fetch_k = int(payload.top_k * _ENSEMBLE_OVER_FETCH_FACTOR)
+    start = time.perf_counter()
+    per_index = await asyncio.gather(
+        *[
+            _execute_one_ensemble_search(
+                dataset=dataset,
+                record=rec,
+                dataset_dir=dataset_dir,
+                query_vector=query_vector,
+                top_k=fetch_k,
+                filters=payload.filters,
+                exclude_cell_id=payload.query.cell_id,
+            )
+            for rec in records
+        ]
+    )
+    latency_ms = (time.perf_counter() - start) * 1000.0
+
+    merged = search_service.merge_ensemble_results(
+        per_index_results=list(per_index),
+        index_ids=[rec.id for rec in records],
+        top_k=payload.top_k,
+    )
+    per_index_latency = {
+        str(rec.id): float(p.get("query_time_ms", 0.0))
+        for rec, p in zip(records, per_index, strict=True)
+    }
+
+    await _log_search(
+        db,
+        dataset_id=payload.dataset_id,
+        user_id=current_user.id,
+        top_k=payload.top_k,
+        filters={"ensemble": True, "index_ids": payload.index_ids},
+        latency_ms=latency_ms,
+    )
+
+    hits = [
+        EnsembleHit(
+            rank=item["rank"],
+            cell_id=item["cell_id"],
+            score=float(item["score"]),
+            voted_by=list(item.get("voted_by", [])),
+            meta=item.get("meta") or {},
+        )
+        for item in merged
+    ]
+    return EnsembleSearchResponse(
+        dataset_id=payload.dataset_id,
+        top_k=payload.top_k,
+        latency_ms=latency_ms,
+        hits=hits,
+        per_index_latency_ms=per_index_latency,
     )

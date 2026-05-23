@@ -518,3 +518,266 @@ async def test_by_vector_stream_dim_mismatch(
         json=bad_payload,
     )
     assert resp.status_code == 422, resp.text
+
+
+# ---------------------------------------------------------------------------
+# F7 多后端 ensemble 检索端到端测试
+# ---------------------------------------------------------------------------
+
+
+def test_merge_ensemble_results_zscore_and_voting() -> None:
+    """ensemble 合并：z-score 归一化 + voted_by 聚合 + 去重排序。
+
+    构造 2 个索引的命中：``a1`` 同时被两个索引命中，``a2/a3`` 各只命中一次；
+    合并后应按 z-score 最小值排序，且 ``a1`` 的 ``voted_by`` 长度为 2。
+    """
+    payload_a = {
+        "results": [
+            {"rank": 1, "cell_id": "a1", "distance": 0.1, "meta": {"x": 1}},
+            {"rank": 2, "cell_id": "a2", "distance": 0.5, "meta": {}},
+            {"rank": 3, "cell_id": "a3", "distance": 0.9, "meta": {}},
+        ]
+    }
+    payload_b = {
+        "results": [
+            {"rank": 1, "cell_id": "a1", "distance": 10.0, "meta": {}},
+            {"rank": 2, "cell_id": "a3", "distance": 12.0, "meta": {"y": 2}},
+            {"rank": 3, "cell_id": "b9", "distance": 14.0, "meta": {}},
+        ]
+    }
+    merged = search_service.merge_ensemble_results(
+        per_index_results=[payload_a, payload_b],
+        index_ids=[101, 202],
+        top_k=4,
+    )
+    by_cid = {item["cell_id"]: item for item in merged}
+    assert set(by_cid) == {"a1", "a2", "a3", "b9"}
+    assert by_cid["a1"]["voted_by"] == [101, 202]
+    assert by_cid["a2"]["voted_by"] == [101]
+    assert by_cid["b9"]["voted_by"] == [202]
+    scores = [item["score"] for item in merged]
+    assert scores == sorted(scores)
+    assert [item["rank"] for item in merged] == [1, 2, 3, 4]
+
+
+@pytest_asyncio.fixture
+async def ensemble_env(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[tuple[AsyncClient, dict[str, str], int, list[int], int], None]:
+    """ensemble 端到端环境：1 个数据集 + 2 个 brute 索引 + 1 个跨数据集索引。
+
+    Yields:
+        ``(client, headers, dataset_id, [idx_a, idx_b], other_index_id)``。
+        ``other_index_id`` 属于另一个数据集，用于跨数据集校验测试。
+    """
+    monkeypatch.setattr(search_cache, "_get_client", lambda: None)
+    search_cache.reset_cache_metrics()
+    IndexCache.instance().clear()
+    search_service.clear_dataset_cache()
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with session_maker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    dim = 8
+    n = 40
+    rng = np.random.default_rng(0)
+
+    ds_main = tmp_path / "ds_ensemble"
+    ds_main.mkdir()
+    vectors = rng.normal(size=(n, dim)).astype(np.float32)
+    np.save(ds_main / "vectors.npy", vectors)
+    cell_ids = [f"c{i:03d}" for i in range(n)]
+    with open(ds_main / "cell_ids.json", "w", encoding="utf-8") as fp:
+        json.dump(cell_ids, fp)
+    pd.DataFrame({"cell_type": ["T"] * n}).to_csv(ds_main / "metadata.csv", index=False)
+
+    ds_other = tmp_path / "ds_other"
+    ds_other.mkdir()
+    vectors_other = rng.normal(size=(n, dim)).astype(np.float32)
+    np.save(ds_other / "vectors.npy", vectors_other)
+    with open(ds_other / "cell_ids.json", "w", encoding="utf-8") as fp:
+        json.dump([f"o{i:03d}" for i in range(n)], fp)
+    pd.DataFrame({"cell_type": ["B"] * n}).to_csv(ds_other / "metadata.csv", index=False)
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+            reg = await ac.post(
+                "/api/v1/auth/register",
+                json={"username": "ens_user", "password": "ens_pw_123"},
+            )
+            assert reg.status_code == 201, reg.text
+            login = await ac.post(
+                "/api/v1/auth/login",
+                data={"username": "ens_user", "password": "ens_pw_123"},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+            async with session_maker() as session:
+                user = (
+                    await session.execute(select(User).where(User.username == "ens_user"))
+                ).scalar_one()
+                main_ds = Dataset(
+                    owner_id=user.id,
+                    name="ensemble_ds",
+                    h5ad_path=str(tmp_path / "main.h5ad"),
+                    vectors_path=str(ds_main),
+                    status="ready",
+                    vector_dim=dim,
+                    cell_count=n,
+                )
+                other_ds = Dataset(
+                    owner_id=user.id,
+                    name="other_ds",
+                    h5ad_path=str(tmp_path / "other.h5ad"),
+                    vectors_path=str(ds_other),
+                    status="ready",
+                    vector_dim=dim,
+                    cell_count=n,
+                )
+                session.add_all([main_ds, other_ds])
+                await session.commit()
+                await session.refresh(main_ds)
+                await session.refresh(other_ds)
+
+                rec_a = IndexRecord(
+                    dataset_id=main_ds.id,
+                    backend="brute",
+                    metric="l2",
+                    params={},
+                    index_path=None,
+                    status="ready",
+                )
+                rec_b = IndexRecord(
+                    dataset_id=main_ds.id,
+                    backend="brute",
+                    metric="cosine",
+                    params={},
+                    index_path=None,
+                    status="ready",
+                )
+                rec_other = IndexRecord(
+                    dataset_id=other_ds.id,
+                    backend="brute",
+                    metric="l2",
+                    params={},
+                    index_path=None,
+                    status="ready",
+                )
+                session.add_all([rec_a, rec_b, rec_other])
+                await session.commit()
+                await session.refresh(rec_a)
+                await session.refresh(rec_b)
+                await session.refresh(rec_other)
+                main_ds_id = int(main_ds.id)
+                index_ids = [int(rec_a.id), int(rec_b.id)]
+                other_index_id = int(rec_other.id)
+
+            yield ac, headers, main_ds_id, index_ids, other_index_id
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        IndexCache.instance().clear()
+        search_service.clear_dataset_cache()
+        await engine.dispose()
+
+
+async def test_ensemble_min_2_indexes(
+    ensemble_env: tuple[AsyncClient, dict[str, str], int, list[int], int],
+) -> None:
+    """只传 1 个 index 应返回 400 并提示数量区间。"""
+    ac, headers, dataset_id, index_ids, _ = ensemble_env
+    resp = await ac.post(
+        "/api/v1/search/ensemble",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_ids": [index_ids[0]],
+            "query": {"cell_id": "c000"},
+            "top_k": 5,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "index_ids" in resp.json()["detail"]
+
+
+async def test_ensemble_merge_dedup(
+    ensemble_env: tuple[AsyncClient, dict[str, str], int, list[int], int],
+) -> None:
+    """2 个 brute 索引（l2 + cosine）合并：hits 去重 + voted_by 长度合理。"""
+    ac, headers, dataset_id, index_ids, _ = ensemble_env
+    resp = await ac.post(
+        "/api/v1/search/ensemble",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_ids": index_ids,
+            "query": {"cell_id": "c000"},
+            "top_k": 6,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dataset_id"] == dataset_id
+    assert body["top_k"] == 6
+    assert body["latency_ms"] >= 0.0
+    assert set(body["per_index_latency_ms"].keys()) == {str(i) for i in index_ids}
+
+    hits = body["hits"]
+    assert 1 <= len(hits) <= 6
+    cell_ids_seen = [hit["cell_id"] for hit in hits]
+    assert len(cell_ids_seen) == len(set(cell_ids_seen))
+    assert "c000" not in cell_ids_seen
+    scores = [hit["score"] for hit in hits]
+    assert scores == sorted(scores)
+    ranks = [hit["rank"] for hit in hits]
+    assert ranks == list(range(1, len(hits) + 1))
+
+    for hit in hits:
+        voted = hit["voted_by"]
+        assert isinstance(voted, list)
+        assert 1 <= len(voted) <= len(index_ids)
+        assert set(voted).issubset(set(index_ids))
+        assert sorted(voted) == voted
+    assert any(len(hit["voted_by"]) == len(index_ids) for hit in hits)
+
+
+async def test_ensemble_different_dataset_rejected(
+    ensemble_env: tuple[AsyncClient, dict[str, str], int, list[int], int],
+) -> None:
+    """index_ids 包含跨数据集索引时应返回 400。"""
+    ac, headers, dataset_id, index_ids, other_index_id = ensemble_env
+    resp = await ac.post(
+        "/api/v1/search/ensemble",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_ids": [index_ids[0], other_index_id],
+            "query": {"cell_id": "c000"},
+            "top_k": 5,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert str(other_index_id) in detail
+    assert "数据集" in detail

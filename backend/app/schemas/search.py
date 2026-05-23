@@ -136,3 +136,53 @@ class BatchSearchResponse(BaseModel):
     groups: list[BatchSearchHitGroup] = Field(
         default_factory=list, description="按 ``query_index`` 升序的结果分组"
     )
+
+
+class EnsembleSearchRequest(BaseModel):
+    """多后端 ensemble 检索请求。
+
+    在 **同一数据集** 上并发跑 2~5 个 ``status=ready`` 索引（如 ``hnswlib`` +
+    ``faiss-ivfpq``），把各路结果按 z-score 归一化后合并，按 cell 取最小归一化
+    分数排序，最终输出带 ``voted_by`` 投票信息的 Top-K 命中。
+    """
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    index_ids: list[int] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "参与 ensemble 的索引 ID 列表，需同属一个 ``dataset_id`` 且均为 ``ready``；"
+            "长度需落在 ``[2, 5]``，越界由端点统一返回 400"
+        ),
+    )
+    query: BatchQueryItem = Field(..., description="查询项：``cell_id`` 与 ``vector`` 二选一")
+    top_k: int = Field(10, ge=1, le=1000, description="最终合并后返回的近邻数量")
+    filters: dict[str, Any] | None = Field(None, description="元数据过滤条件，所有索引共享")
+
+
+class EnsembleHit(BaseModel):
+    """ensemble 合并后的单条命中结果。"""
+
+    rank: int = Field(..., description="结果排名，从 1 开始")
+    cell_id: str = Field(..., description="细胞编号")
+    score: float = Field(
+        ...,
+        description="集成后的归一化分数（取各索引 z-score 最低值，越小越相似）",
+    )
+    voted_by: list[int] = Field(
+        default_factory=list, description="命中该 cell 的索引 ID 列表（去重升序）"
+    )
+    meta: dict[str, Any] | None = Field(None, description="细胞元信息")
+
+
+class EnsembleSearchResponse(BaseModel):
+    """多后端 ensemble 检索响应。"""
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    top_k: int = Field(..., description="最终返回的近邻数量")
+    latency_ms: float = Field(..., description="端到端 wall-clock 耗时（毫秒）")
+    hits: list[EnsembleHit] = Field(default_factory=list, description="集成后的命中列表")
+    per_index_latency_ms: dict[str, float] = Field(
+        default_factory=dict,
+        description="各索引 ANN 计算耗时（毫秒），key 为 ``str(index_id)``",
+    )

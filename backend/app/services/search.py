@@ -523,6 +523,70 @@ async def async_batch_search(
     return list(await asyncio.gather(*coros))
 
 
+def merge_ensemble_results(
+    per_index_results: list[dict[str, Any]],
+    index_ids: list[int],
+    top_k: int,
+) -> list[dict[str, Any]]:
+    """合并 **同一数据集** 上多个索引的检索结果（多后端 ensemble）。
+
+    对每个索引的 ``distance`` 做 z-score 归一化 ``(d - mean) / std``，
+    然后按 ``cell_id`` 聚合：取所有索引中最低（最相似）的归一化分数，
+    ``voted_by`` 收集所有命中该 cell 的索引 ID（去重升序）。最终按集成
+    分数升序排序，取前 ``top_k`` 条并重排 ``rank``。
+
+    与 :func:`merge_multi_dataset_results` 的差异：
+        - ensemble 在同一数据集上、按 cell 去重并记录投票来源；
+        - multi-dataset 在不同数据集上、保留每条命中并填 ``source_dataset_id``；
+        - 归一化策略：ensemble 用 z-score（更鲁棒于 ANN 分数尺度差异），
+          multi-dataset 用 min-max。
+
+    Args:
+        per_index_results: 每个索引对应的 :func:`search_with_backend` 输出，
+            顺序需与 ``index_ids`` 一一对应。
+        index_ids: 与 ``per_index_results`` 对齐的索引 ID 列表。
+        top_k: 合并后保留的命中数量。
+
+    Returns:
+        list[dict[str, Any]]: 重排后的 ensemble 命中列表，每条形如
+        ``{"rank", "cell_id", "score", "voted_by", "meta"}``。
+    """
+    aggregated: dict[str, dict[str, Any]] = {}
+    for idx_id, payload in zip(index_ids, per_index_results, strict=False):
+        hits = payload.get("results", [])
+        if not hits:
+            continue
+        distances = np.array([h["distance"] for h in hits], dtype=np.float64)
+        mean = float(distances.mean())
+        std = float(distances.std())
+        normalized = (
+            np.zeros_like(distances) if std <= 1e-12 else (distances - mean) / std
+        )
+        for hit, z_score in zip(hits, normalized, strict=False):
+            cid = hit["cell_id"]
+            current = aggregated.get(cid)
+            if current is None:
+                aggregated[cid] = {
+                    "cell_id": cid,
+                    "score": float(z_score),
+                    "voted_by": [int(idx_id)],
+                    "meta": hit.get("meta") or {},
+                }
+            else:
+                if float(z_score) < current["score"]:
+                    current["score"] = float(z_score)
+                if int(idx_id) not in current["voted_by"]:
+                    current["voted_by"].append(int(idx_id))
+                if not current.get("meta") and hit.get("meta"):
+                    current["meta"] = hit.get("meta") or {}
+
+    merged = sorted(aggregated.values(), key=lambda x: x["score"])[:top_k]
+    for i, item in enumerate(merged, start=1):
+        item["rank"] = i
+        item["voted_by"] = sorted(set(item["voted_by"]))
+    return merged
+
+
 def merge_multi_dataset_results(
     per_dataset_results: list[dict[str, Any]],
     dataset_ids: list[int],
