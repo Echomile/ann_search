@@ -45,3 +45,35 @@ export interface SearchResponse {
   total_candidates: number | null;
   hits: SearchHit[];
 }
+
+// 批量检索（F1）：N 个查询并发，单数据集，复用 Redis 检索缓存
+export interface BatchQueryItem {
+  cell_id?: string | null;
+  vector?: number[] | null;
+}
+
+export interface BatchSearchRequest {
+  dataset_id: number;
+  index_id?: number | null;
+  queries: BatchQueryItem[];
+  top_k: number;
+  filters?: SearchFilters | null;
+}
+
+export interface BatchSearchHitGroup {
+  query_index: number;
+  query_cell_id: string | null;
+  hits: SearchHit[];
+  latency_ms: number;
+  cache_hit: boolean;
+}
+
+export interface BatchSearchResponse {
+  dataset_id: number;
+  top_k: number;
+  total_queries: number;
+  total_latency_ms: number;
+  index_backend: string | null;
+  metric: string | null;
+  groups: BatchSearchHitGroup[];
+}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class SearchByCellId(BaseModel):
@@ -78,3 +78,61 @@ class SearchResponse(BaseModel):
     metric: str | None = Field(None, description="距离度量")
     total_candidates: int | None = Field(None, description="参与排序的候选数量")
     hits: list[SearchHit] = Field(default_factory=list, description="命中结果列表")
+
+
+class BatchQueryItem(BaseModel):
+    """批量检索单条查询项。
+
+    ``cell_id`` 与 ``vector`` 二选一必填；同时给出时优先按 ``cell_id`` 解析。
+    """
+
+    cell_id: str | None = Field(None, description="查询细胞编号（存在时优先生效）")
+    vector: list[float] | None = Field(None, description="查询向量；与 ``cell_id`` 二选一")
+
+    @model_validator(mode="after")
+    def _check_query_source(self) -> BatchQueryItem:
+        """校验 ``cell_id`` 与 ``vector`` 至少给出一项。"""
+        if self.cell_id is None and self.vector is None:
+            raise ValueError("cell_id 与 vector 必须二选一")
+        return self
+
+
+class BatchSearchRequest(BaseModel):
+    """批量检索请求：单数据集 N 个查询并发执行。
+
+    长度范围：``1 <= len(queries) <= 50``；越界由 schema/端点联合拦截。
+    """
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    index_id: int | None = Field(
+        None, description="指定使用的索引 ID；为空时自动取最新 ``status=ready`` 索引"
+    )
+    queries: list[BatchQueryItem] = Field(
+        ..., min_length=1, description="查询项列表，长度 1~50"
+    )
+    top_k: int = Field(10, ge=1, le=1000, description="每个查询返回的近邻数量")
+    filters: dict[str, Any] | None = Field(None, description="所有查询共享的 metadata 过滤条件")
+
+
+class BatchSearchHitGroup(BaseModel):
+    """批量检索单组结果。"""
+
+    query_index: int = Field(..., description="查询索引（与入参 ``queries`` 顺序对齐，从 0 开始）")
+    query_cell_id: str | None = Field(None, description="若以 cell_id 发起查询则回填，否则为 None")
+    hits: list[SearchHit] = Field(default_factory=list, description="命中结果列表")
+    latency_ms: float = Field(..., description="单查询耗时（毫秒）")
+    cache_hit: bool = Field(False, description="是否命中 F2 Redis 检索缓存")
+
+
+class BatchSearchResponse(BaseModel):
+    """批量检索响应。"""
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    top_k: int = Field(..., description="每个查询返回的近邻数量")
+    total_queries: int = Field(..., description="批量查询总数")
+    total_latency_ms: float = Field(..., description="批量整体 wall-clock 耗时（毫秒）")
+    index_backend: str | None = Field(None, description="后端实现名，如 hnswlib")
+    metric: str | None = Field(None, description="距离度量")
+    groups: list[BatchSearchHitGroup] = Field(
+        default_factory=list, description="按 ``query_index`` 升序的结果分组"
+    )

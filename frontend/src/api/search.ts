@@ -1,5 +1,7 @@
 import { httpClient } from './client';
 import type {
+  BatchSearchRequest,
+  BatchSearchResponse,
   MultiDatasetSearchRequest,
   SearchByIdRequest,
   SearchByVectorRequest,
@@ -20,6 +22,11 @@ export const searchApi = {
 
   multiDataset: async (payload: MultiDatasetSearchRequest): Promise<SearchResponse> => {
     const { data } = await httpClient.post<SearchResponse>('/search/multi-dataset', payload);
+    return data;
+  },
+
+  batch: async (payload: BatchSearchRequest): Promise<BatchSearchResponse> => {
+    const { data } = await httpClient.post<BatchSearchResponse>('/search/batch', payload);
     return data;
   },
 };

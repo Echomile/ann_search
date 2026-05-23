@@ -6,19 +6,37 @@
 - 以查询点自身向量发起检索时可正确排除自身；
 - ``filters`` 能够按 metadata 字段缩窄候选集合；
 - ``load_dataset_artifacts`` 能加载 ``vectors.npy`` + ``cell_ids.json`` + ``metadata.csv``。
+
+F1 批量检索端到端测试：
+    覆盖 ``POST /api/v1/search/batch`` 的成功路径、混合查询、空与超限边界。
 """
 
 from __future__ import annotations
 
 import json
 import os
+from collections.abc import AsyncGenerator
 
 import numpy as np
 import pandas as pd
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
+import app.models  # noqa: F401  确保所有模型注册到 metadata
+from app.api.deps import get_db
+from app.db.base import Base
+from app.main import app
+from app.models.dataset import Dataset
+from app.models.index_record import IndexRecord
+from app.models.user import User
 from app.services import search as search_service
+from app.services import search_cache
 from app.services.ann.brute_backend import BruteBackend
+from app.services.ann.cache import IndexCache
 
 DIM = 8
 N = 100
@@ -180,3 +198,223 @@ def test_merge_multi_dataset_results() -> None:
     assert {m["source_dataset_id"] for m in merged} == {1, 2}
     norms = [m["normalized_distance"] for m in merged]
     assert norms == sorted(norms)
+
+
+# ---------------------------------------------------------------------------
+# F1 批量检索 API 端到端测试
+# ---------------------------------------------------------------------------
+
+_BATCH_DIM = 8
+_BATCH_N = 40
+
+
+@pytest_asyncio.fixture
+async def batch_env(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncGenerator[tuple[AsyncClient, dict[str, str], int, int], None]:
+    """搭建批量检索端到端环境：内存 SQLite + brute 索引 + 注册登录。
+
+    Yields:
+        ``(client, headers, dataset_id, index_id)``：测试可直接用其发起 ``/search/batch`` 请求。
+    """
+    monkeypatch.setattr(search_cache, "_get_client", lambda: None)
+    search_cache.reset_cache_metrics()
+    IndexCache.instance().clear()
+    search_service.clear_dataset_cache()
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with session_maker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    dataset_dir = tmp_path / "ds_batch"
+    dataset_dir.mkdir()
+    rng = np.random.default_rng(0)
+    vectors = rng.normal(size=(_BATCH_N, _BATCH_DIM)).astype(np.float32)
+    np.save(dataset_dir / "vectors.npy", vectors)
+    cell_ids = [f"c{i:03d}" for i in range(_BATCH_N)]
+    with open(dataset_dir / "cell_ids.json", "w", encoding="utf-8") as fp:
+        json.dump(cell_ids, fp)
+    pd.DataFrame({"cell_type": ["T"] * _BATCH_N}).to_csv(dataset_dir / "metadata.csv", index=False)
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+            reg = await ac.post(
+                "/api/v1/auth/register",
+                json={"username": "batch_user", "password": "batch_pw_123"},
+            )
+            assert reg.status_code == 201, reg.text
+            login = await ac.post(
+                "/api/v1/auth/login",
+                data={"username": "batch_user", "password": "batch_pw_123"},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+            async with session_maker() as session:
+                user = (
+                    await session.execute(select(User).where(User.username == "batch_user"))
+                ).scalar_one()
+                dataset = Dataset(
+                    owner_id=user.id,
+                    name="batch_ds",
+                    h5ad_path=str(tmp_path / "fake.h5ad"),
+                    vectors_path=str(dataset_dir),
+                    status="ready",
+                    vector_dim=_BATCH_DIM,
+                    cell_count=_BATCH_N,
+                )
+                session.add(dataset)
+                await session.commit()
+                await session.refresh(dataset)
+
+                record = IndexRecord(
+                    dataset_id=dataset.id,
+                    backend="brute",
+                    metric="l2",
+                    params={},
+                    index_path=None,
+                    status="ready",
+                )
+                session.add(record)
+                await session.commit()
+                await session.refresh(record)
+                dataset_id = int(dataset.id)
+                record_id = int(record.id)
+
+            yield ac, headers, dataset_id, record_id
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        IndexCache.instance().clear()
+        search_service.clear_dataset_cache()
+        await engine.dispose()
+
+
+async def test_batch_search_by_vector(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """3 个随机向量批量查询应返回 3 组 hits，每组 ``top_k=5`` 且距离非递减。"""
+    ac, headers, dataset_id, index_id = batch_env
+    rng = np.random.default_rng(7)
+    queries = [
+        {"vector": rng.normal(size=_BATCH_DIM).astype(np.float32).tolist()} for _ in range(3)
+    ]
+    resp = await ac.post(
+        "/api/v1/search/batch",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_id": index_id,
+            "queries": queries,
+            "top_k": 5,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["dataset_id"] == dataset_id
+    assert body["top_k"] == 5
+    assert body["total_queries"] == 3
+    assert body["index_backend"] == "brute"
+    assert body["metric"] == "l2"
+    assert body["total_latency_ms"] >= 0.0
+    assert len(body["groups"]) == 3
+    for i, group in enumerate(body["groups"]):
+        assert group["query_index"] == i
+        assert group["query_cell_id"] is None
+        assert len(group["hits"]) == 5
+        distances = [hit["distance"] for hit in group["hits"]]
+        assert distances == sorted(distances)
+        assert isinstance(group["cache_hit"], bool)
+        assert group["latency_ms"] >= 0.0
+
+
+async def test_batch_search_mixed(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """混合 cell_id + vector 各 1 个：每组返回 ``top_k`` 命中且 ``query_cell_id`` 正确回填。"""
+    ac, headers, dataset_id, index_id = batch_env
+    rng = np.random.default_rng(3)
+    queries = [
+        {"cell_id": "c001"},
+        {"vector": rng.normal(size=_BATCH_DIM).astype(np.float32).tolist()},
+    ]
+    resp = await ac.post(
+        "/api/v1/search/batch",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_id": index_id,
+            "queries": queries,
+            "top_k": 4,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_queries"] == 2
+    groups = body["groups"]
+    assert groups[0]["query_cell_id"] == "c001"
+    assert groups[1]["query_cell_id"] is None
+    for group in groups:
+        assert len(group["hits"]) == 4
+    cell_id_hits = {hit["cell_id"] for hit in groups[0]["hits"]}
+    assert "c001" not in cell_id_hits
+
+
+async def test_batch_search_empty_returns_400(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """空 ``queries`` 应被 schema/端点拦截（422 或 400 均可）。"""
+    ac, headers, dataset_id, index_id = batch_env
+    resp = await ac.post(
+        "/api/v1/search/batch",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_id": index_id,
+            "queries": [],
+            "top_k": 5,
+        },
+    )
+    assert resp.status_code in {400, 422}, resp.text
+
+
+async def test_batch_search_too_many_returns_400(
+    batch_env: tuple[AsyncClient, dict[str, str], int, int],
+) -> None:
+    """超过上限的 51 条查询应返回 400 并提示数量上限。"""
+    ac, headers, dataset_id, index_id = batch_env
+    rng = np.random.default_rng(1)
+    queries = [
+        {"vector": rng.normal(size=_BATCH_DIM).astype(np.float32).tolist()} for _ in range(51)
+    ]
+    resp = await ac.post(
+        "/api/v1/search/batch",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "index_id": index_id,
+            "queries": queries,
+            "top_k": 5,
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "queries" in resp.json()["detail"]

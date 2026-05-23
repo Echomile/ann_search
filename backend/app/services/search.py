@@ -462,6 +462,67 @@ async def async_search_by_cell_id(
     return await search_cache.cached_or_compute(key, _compute)
 
 
+async def async_batch_search(
+    queries: list[tuple[str | None, list[float] | np.ndarray | None]],
+    dataset_dir: str,
+    backend: Any,
+    *,
+    top_k: int = 10,
+    filters: dict[str, Any] | None = None,
+    metric: str | None = None,
+    index_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """批量并发执行 N 个查询，复用 F2 Redis 检索缓存。
+
+    每个查询独立走一次 :func:`async_search_by_cell_id` 或 :func:`async_search_by_vector`，
+    传入相同的 ``index_id`` 让 ``cached_or_compute`` 按 per-query key 命中缓存。
+    并发由 :func:`asyncio.gather` 调度，底层 ANN 计算仍走线程池。
+
+    Args:
+        queries: ``(cell_id, vector)`` 元组列表，二选一非空；同时给出时按 ``cell_id`` 优先。
+        dataset_dir: 数据集制品目录。
+        backend: 已加载完成的 :class:`IndexBackend` 实例。
+        top_k: 每个查询返回的近邻数量。
+        filters: 所有查询共享的 metadata 过滤条件。
+        metric: 距离度量名。
+        index_id: 索引 ID；非 None 时启用 F2 检索缓存（per-query）。
+
+    Returns:
+        list[dict[str, Any]]: 与 ``queries`` 等长、顺序一致的结果列表，
+        每条形如 :func:`search_with_backend` 输出并可能带 ``cache_hit``。
+
+    Raises:
+        KeyError: 任一 ``cell_id`` 不存在于数据集（由底层抛出）。
+    """
+    coros: list[Any] = []
+    for cell_id, vector in queries:
+        if cell_id is not None:
+            coros.append(
+                async_search_by_cell_id(
+                    query_cell_id=cell_id,
+                    dataset_dir=dataset_dir,
+                    backend=backend,
+                    top_k=top_k,
+                    filters=filters,
+                    metric=metric,
+                    index_id=index_id,
+                )
+            )
+        else:
+            coros.append(
+                async_search_by_vector(
+                    query_vector=vector,  # type: ignore[arg-type]
+                    dataset_dir=dataset_dir,
+                    backend=backend,
+                    top_k=top_k,
+                    filters=filters,
+                    metric=metric,
+                    index_id=index_id,
+                )
+            )
+    return list(await asyncio.gather(*coros))
+
+
 def merge_multi_dataset_results(
     per_dataset_results: list[dict[str, Any]],
     dataset_ids: list[int],

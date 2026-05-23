@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
@@ -14,6 +15,9 @@ from app.models.dataset import Dataset
 from app.models.index_record import IndexRecord
 from app.models.search_log import SearchLog
 from app.schemas.search import (
+    BatchSearchHitGroup,
+    BatchSearchRequest,
+    BatchSearchResponse,
     MultiDatasetSearchRequest,
     SearchByCellId,
     SearchByVector,
@@ -368,4 +372,126 @@ async def _execute_one_multi_search(
         top_k=top_k,
         filters=filters,
         metric=record.metric,
+    )
+
+
+_BATCH_MAX_QUERIES = 50
+
+
+@router.post(
+    "/batch",
+    response_model=BatchSearchResponse,
+    summary="批量检索",
+    description=(
+        "对单个数据集一次性提交 ``N`` 个查询，后端用 :func:`asyncio.gather` 并发执行；"
+        " 每个查询独立写入 F2 Redis 检索缓存（按 query+filter+top_k+index_id 哈希），"
+        "可显著降低重复查询成本。"
+        "\n\n"
+        "- ``queries`` 长度需满足 ``1 <= N <= 50``，超出返回 400；空列表返回 422；\n"
+        "- ``cell_id`` 与 ``vector`` 二选一必填，同时给出时按 ``cell_id`` 优先解析；\n"
+        "- ``filters`` 在所有查询间共享；``top_k`` 对全部查询统一生效；\n"
+        "- 整体 wall-time 与每条查询的 latency 都会回填到响应。"
+    ),
+)
+async def search_batch_endpoint(
+    payload: BatchSearchRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> BatchSearchResponse:
+    """批量检索：N 个查询并发执行，复用 F2 Redis 检索缓存。"""
+    if len(payload.queries) > _BATCH_MAX_QUERIES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"queries 数量上限 {_BATCH_MAX_QUERIES}，当前 {len(payload.queries)}",
+        )
+
+    dataset = await _get_dataset(db, payload.dataset_id)
+    if dataset.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {payload.dataset_id}"
+        )
+    record = await _get_index_record(
+        db, dataset_id=payload.dataset_id, index_id=payload.index_id
+    )
+
+    if dataset.vector_dim:
+        for i, item in enumerate(payload.queries):
+            if item.cell_id is None and item.vector is not None and len(item.vector) != dataset.vector_dim:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"queries[{i}] 向量维度 {len(item.vector)} 与数据集维度 "
+                        f"{dataset.vector_dim} 不一致"
+                    ),
+                )
+
+    dataset_dir = _resolve_dataset_dir(dataset)
+    backend = search_service.get_index_backend(
+        index_id=record.id,
+        dataset_dir=dataset_dir,
+        backend_name=record.backend,
+        metric=record.metric,
+        dim=dataset.vector_dim,
+        index_path=record.index_path,
+    )
+
+    queries: list[tuple[str | None, list[float] | None]] = [
+        (item.cell_id, None) if item.cell_id is not None else (None, item.vector)
+        for item in payload.queries
+    ]
+
+    start = time.perf_counter()
+    try:
+        per_query = await search_service.async_batch_search(
+            queries=queries,
+            dataset_dir=dataset_dir,
+            backend=backend,
+            top_k=payload.top_k,
+            filters=payload.filters,
+            metric=record.metric,
+            index_id=record.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    total_latency_ms = (time.perf_counter() - start) * 1000.0
+
+    await _log_search(
+        db,
+        dataset_id=payload.dataset_id,
+        user_id=current_user.id,
+        top_k=payload.top_k,
+        filters={"batch": True, "n": len(payload.queries)},
+        latency_ms=total_latency_ms,
+    )
+
+    groups: list[BatchSearchHitGroup] = []
+    for i, (item, result) in enumerate(zip(payload.queries, per_query, strict=True)):
+        hits = [
+            SearchHit(
+                rank=hit["rank"],
+                cell_id=hit["cell_id"],
+                distance=hit["distance"],
+                meta=hit.get("meta") or {},
+                source_dataset_id=hit.get("source_dataset_id"),
+            )
+            for hit in result.get("results", [])
+        ]
+        groups.append(
+            BatchSearchHitGroup(
+                query_index=i,
+                query_cell_id=item.cell_id,
+                hits=hits,
+                latency_ms=float(result.get("query_time_ms", 0.0)),
+                cache_hit=bool(result.get("cache_hit", False)),
+            )
+        )
+
+    return BatchSearchResponse(
+        dataset_id=payload.dataset_id,
+        top_k=payload.top_k,
+        total_queries=len(payload.queries),
+        total_latency_ms=total_latency_ms,
+        index_backend=record.backend,
+        metric=record.metric,
+        groups=groups,
     )
