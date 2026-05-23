@@ -52,10 +52,15 @@ def _ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(UTC)
 
 
-async def compute_search_stats(db: AsyncSession, user_id: int) -> dict[str, Any]:
+async def compute_search_stats(
+    db: AsyncSession,
+    user_id: int,
+    dataset_id: int | None = None,
+) -> dict[str, Any]:
     """汇总指定用户的检索日志统计指标。
 
     Args:
+        dataset_id: 可选，按数据集过滤。``None`` 表示统计全部数据集。
         db: 异步数据库会话。
         user_id: 目标用户 ID；仅统计 ``SearchLog.user_id == user_id`` 的记录。
 
@@ -74,6 +79,8 @@ async def compute_search_stats(db: AsyncSession, user_id: int) -> dict[str, Any]
         .outerjoin(Dataset, Dataset.id == SearchLog.dataset_id)
         .where(SearchLog.user_id == user_id)
     )
+    if dataset_id is not None:
+        stmt = stmt.where(SearchLog.dataset_id == dataset_id)
     rows = (await db.execute(stmt)).all()
 
     all_latencies: list[float] = []
@@ -103,32 +110,30 @@ async def compute_search_stats(db: AsyncSession, user_id: int) -> dict[str, Any]
             }
         )
 
-    now = datetime.now(tz=UTC)
-    end_hour = now.replace(minute=0, second=0, microsecond=0)
-    start_hour = end_hour - timedelta(hours=23)
-
-    hourly_counts: dict[datetime, int] = defaultdict(int)
-    hourly_latencies: dict[datetime, list[float]] = defaultdict(list)
+    # 滚动 24 小时窗口：以当前时刻为锚点，向前 24 个 1 小时桶，最后一个桶 [now-1h, now]
+    # 这样跨整点不会丢失数据，更符合"最近 24 小时"语义。
+    now = datetime.now(tz=UTC).replace(microsecond=0)
+    start_time = now - timedelta(hours=24)
+    hourly_counts: list[int] = [0] * 24
+    hourly_latencies: list[list[float]] = [[] for _ in range(24)]
     for entries in by_ds_rows.values():
         for latency, created_at, _ in entries:
-            if created_at < start_hour or created_at > end_hour + timedelta(hours=1):
+            if created_at < start_time or created_at > now:
                 continue
-            bucket = created_at.replace(minute=0, second=0, microsecond=0)
-            if bucket < start_hour or bucket > end_hour:
-                continue
-            hourly_counts[bucket] += 1
+            offset_s = (created_at - start_time).total_seconds()
+            idx = min(23, int(offset_s // 3600))
+            hourly_counts[idx] += 1
             if latency is not None:
-                hourly_latencies[bucket].append(latency)
+                hourly_latencies[idx].append(latency)
 
     hourly_24h: list[dict[str, Any]] = []
     for idx in range(24):
-        bucket = start_hour + timedelta(hours=idx)
-        lats = hourly_latencies.get(bucket, [])
+        bucket_start = start_time + timedelta(hours=idx)
         hourly_24h.append(
             {
-                "hour_iso": _format_hour_iso(bucket),
-                "queries": hourly_counts.get(bucket, 0),
-                "avg_latency_ms": _mean(lats),
+                "hour_iso": _format_hour_iso(bucket_start),
+                "queries": hourly_counts[idx],
+                "avg_latency_ms": _mean(hourly_latencies[idx]),
             }
         )
 

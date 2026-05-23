@@ -28,7 +28,12 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 async def search_stats(
     current_user: CurrentUser,
     db: DbSession,
+    dataset_id: int | None = None,
 ) -> SearchStatsResponse:
-    """返回当前用户的检索日志统计指标。"""
-    payload = await compute_search_stats(db, user_id=current_user.id)
+    """返回当前用户的检索日志统计指标。
+
+    Args:
+        dataset_id: 可选 query 参数，按数据集过滤；``None`` 时统计全部数据集。
+    """
+    payload = await compute_search_stats(db, user_id=current_user.id, dataset_id=dataset_id)
     return SearchStatsResponse(**payload)

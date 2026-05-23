@@ -17,14 +17,11 @@ from app.schemas.evaluation import (
     BenchmarkRequest,
     BenchmarkResult,
     BenchmarkTaskHandle,
-    SearchLogStats,
 )
-from app.services.evaluation import compute_search_log_stats
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
-stats_router = APIRouter(prefix="/stats", tags=["stats"])
 
 
 def _benchmarks_dir() -> str:
@@ -150,23 +147,3 @@ async def list_results(dataset_id: int | None = None) -> list[dict[str, Any]]:
     return out
 
 
-@stats_router.get(
-    "/search",
-    response_model=SearchLogStats,
-    summary="用户检索日志统计",
-    description=(
-        "聚合当前用户的检索日志：总数、最近 24h 数、平均/分位延迟、按数据集分组以及最近 24h 每小时趋势。"
-        " 支持通过 ``dataset_id`` 仅统计指定数据集；PostgreSQL 走 ``percentile_cont`` 与 ``date_trunc``，"
-        " 测试环境（SQLite）自动回退到 numpy 端聚合。"
-    ),
-)
-async def get_search_log_stats(
-    db: DbSession,
-    current_user: CurrentUser,
-    dataset_id: int | None = None,
-) -> SearchLogStats:
-    """检索日志聚合统计。"""
-    payload = await compute_search_log_stats(
-        db, user_id=current_user.id, dataset_id=dataset_id
-    )
-    return SearchLogStats(**payload)
