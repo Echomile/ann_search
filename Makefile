@@ -15,7 +15,7 @@ COMPOSE_DEV   := docker compose -f infra/docker-compose.yml -f infra/docker-comp
         migrate makemigration test test-backend test-frontend \
         lint lint-backend lint-frontend format format-backend format-frontend \
         install install-backend install-frontend clean clean-cache prune \
-        e2e demo-video slides submission benchmark
+        e2e screenshots demo-video slides submission benchmark
 
 help: ## 列出全部可用命令
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -116,6 +116,9 @@ prune: ## 移除 docker 卷与镜像（危险）
 # ============ 课程交付物 ============
 e2e: ## 跑端到端真实数据测试（注入 liver.h5ad）
 	cd backend && uv run python ../e2e/test_liver_e2e.py
+
+screenshots: ## 重新生成 9 张端到端 UI 实测截图
+	cd backend && uv run python ../e2e/capture_screenshots.py
 
 demo-video: ## 自动录制带中文配音的演示视频 -> docs/video/demo_final.mp4
 	cd backend && uv run python ../e2e/demo_video.py

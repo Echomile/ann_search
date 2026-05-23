@@ -204,6 +204,41 @@ uv run arq app.tasks.worker.WorkerSettings
 - **端到端测试脚本**：[`e2e/test_liver_e2e.py`](e2e/test_liver_e2e.py)（注入 1.3 GB liver.h5ad 全流程验证） · [`e2e/demo_video.py`](e2e/demo_video.py)（视频自动录制）
 - **9 张实测截图**：[`docs/e2e_screenshots/`](docs/e2e_screenshots/)
 
+## 业务页面预览（liver.h5ad 真实数据）
+
+<table>
+<tr>
+  <td align="center" width="33%">
+    <a href="docs/e2e_screenshots/04_dataset_ready.png"><img src="docs/e2e_screenshots/04_dataset_ready.png" alt="数据集管理"/></a><br/>
+    <sub>数据集管理 · 69 032 cells × 30 维 X_pca</sub>
+  </td>
+  <td align="center" width="33%">
+    <a href="docs/e2e_screenshots/05_index_page.png"><img src="docs/e2e_screenshots/05_index_page.png" alt="索引管理"/></a><br/>
+    <sub>索引管理 · 5 种 ANN 后端可切换</sub>
+  </td>
+  <td align="center" width="33%">
+    <a href="docs/e2e_screenshots/07_search_result.png"><img src="docs/e2e_screenshots/07_search_result.png" alt="相似细胞检索"/></a><br/>
+    <sub>相似细胞检索 · 0.97 ms 延迟 · 56 列元数据</sub>
+  </td>
+</tr>
+<tr>
+  <td align="center">
+    <a href="docs/e2e_screenshots/10_visualization.png"><img src="docs/e2e_screenshots/10_visualization.png" alt="结果可视化"/></a><br/>
+    <sub>Plotly 散点 · 红五角星=查询 · 橙色=Top-K · 灰色=背景</sub>
+  </td>
+  <td align="center">
+    <a href="docs/e2e_screenshots/08_evaluation.png"><img src="docs/e2e_screenshots/08_evaluation.png" alt="性能评测"/></a><br/>
+    <sub>Recall@10=99.9% · 并发 vs 延迟 / QPS 折线柱图</sub>
+  </td>
+  <td align="center">
+    <a href="docs/e2e_screenshots/09_rag.png"><img src="docs/e2e_screenshots/09_rag.png" alt="RAG 自然语言查询"/></a><br/>
+    <sub>RAG · 中文提问 · AI 解析 → ANN → 总结</sub>
+  </td>
+</tr>
+</table>
+
+> 上述截图由 [`e2e/capture_screenshots.py`](e2e/capture_screenshots.py) 用 Playwright 自动驱动 UI 完成真实数据交互后捕获，可通过 `make screenshots` 重新生成。
+
 ## 提交清单（课程交付物）
 
 | 类别 | 路径 | 状态 |
