@@ -396,21 +396,54 @@ hits: [{cell_id, distance, meta}, ...]
 
 <div class="cols">
 
-![登录后首页 w:480](../e2e_screenshots/01_after_login.png)
+![数据集管理 w:460](../e2e_screenshots/04_dataset_ready.png)
 
-![检索结果 w:480](../e2e_screenshots/07_search_result.png)
+![索引管理 w:460](../e2e_screenshots/05_index_page.png)
 
 </div>
 
 <div class="cols">
 
-![索引就绪 w:480](../e2e_screenshots/06_index_ready.png)
+![检索结果 w:460](../e2e_screenshots/07_search_result.png)
 
-![RAG 自然语言 w:480](../e2e_screenshots/09_rag.png)
+![RAG 自然语言 w:460](../e2e_screenshots/09_rag.png)
 
 </div>
 
-**Playwright E2E** 一键复现：登录 → 上传 → 预处理 → 构建索引 → 检索 → 评测 → RAG（9 张截图）
+**Playwright E2E** 一键复现：登录 → 上传 → 预处理 → 构建索引 → 检索 → 评测 → RAG（10 张实测截图）
+
+---
+
+<!-- _class: smaller -->
+
+# 6.1.1 相似细胞检索（真实数据）
+
+![h:560](../e2e_screenshots/07_search_result.png)
+
+- **耗时 0.47 ms**（hnswlib + l2）· Top-10 命中 · **56 列 metadata 自动折叠**为 6 个重要字段（cell_type / tissue / disease / donor_age / sex / assay）+ "+50 更多" Popover
+- 第一名命中：`cell_type=hepatocyte · tissue=caudate lobe of liver · disease=normal · donor_age=>60 years`
+
+---
+
+<!-- _class: smaller -->
+
+# 6.1.2 真实 UMAP 可视化（5 万点）
+
+![h:560](../e2e_screenshots/10_visualization.png)
+
+- 后端 `GET /datasets/{id}/umap` 返回真实 UMAP 2D 坐标，自动从 69 032 下采样到 50 000 避免拖垮浏览器
+- Plotly `scattergl` GPU 加速渲染 · 灰色背景 + **橙色 Top-19 邻居** + 红色五角星查询细胞
+
+---
+
+<!-- _class: smaller -->
+
+# 6.1.3 性能评测面板（实测）
+
+![h:560](../e2e_screenshots/08_evaluation.png)
+
+- **Recall@10 = 99.90%** · **Recall@100 = 99.64%** · 构建耗时 681.8 ms · 内存 16.33 MB
+- 并发 vs 延迟（P50/P95/P99）折线图 + 并发 vs QPS 柱图（峰值 ~60 k QPS）
 
 ---
 
