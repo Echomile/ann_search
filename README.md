@@ -255,6 +255,60 @@ uv run arq app.tasks.worker.WorkerSettings
 
 > 上述截图由 [`e2e/capture_screenshots.py`](e2e/capture_screenshots.py) 用 Playwright 自动驱动 UI 完成真实数据交互后捕获，可通过 `make screenshots` 重新生成。
 
+## 故障排查 (Troubleshooting)
+
+### Q1：`make up` 启动后 backend 容器反复重启
+**原因**：通常是 `.env` 缺失或 `DATABASE_URL` 指向不存在的 PG。
+**解决**：`cp .env.example .env` 后再 `make up`；确认 `docker compose -f infra/docker-compose.yml ps` 中 `postgres` 状态为 `healthy` 再启动 backend。
+
+### Q2：前端上传 `.h5ad` 返回 `422 Field required: name/file`
+**原因**：axios 默认 `Content-Type: application/json` 把 FormData 序列化丢失了 boundary。
+**解决**：已在 [`frontend/src/api/client.ts`](frontend/src/api/client.ts) 的请求拦截器中针对 `FormData` 自动删除 `Content-Type` 让浏览器生成 `multipart/form-data; boundary=...`，**升级到最新版即可**。
+
+### Q3：上传后 `status` 长时间停在 `preprocessing`
+**原因**：首次启动 worker 时 `umap-learn` 需要 numba JIT 编译，单次会冷启动 60 秒；之后所有任务都走编译缓存。
+**解决**：[`backend/app/tasks/worker.py`](backend/app/tasks/worker.py) 的 `on_startup` 钩子已预热 JIT，worker 启动多花 30-40 秒但消除冷启动卡顿。如果仍卡，检查 `make logs worker`。
+
+### Q4：跨域报 `CORS_ORIGINS json decode error`
+**原因**：pydantic-settings 默认对 list 类型字段使用 JSON 解析，但 `.env` 里写成了逗号分隔。
+**解决**：已在 [`backend/app/core/config.py`](backend/app/core/config.py) 用 `NoDecode + field_validator` 兼容两种写法（JSON 数组 / 逗号分隔字符串）。
+
+### Q5：登录后请求 401 / token 失效
+**原因**：JWT 默认 24 小时过期（`ACCESS_TOKEN_EXPIRE_MINUTES=1440`），过期后 axios 响应拦截器会清掉 token 并跳 `/login`。
+**解决**：重新登录；要修改过期时长在 `.env` 调 `ACCESS_TOKEN_EXPIRE_MINUTES`。
+
+### Q6：`pnpm build` 报 esbuild 二进制缺失
+**原因**：pnpm v9+ 默认拒绝运行依赖包的 install 脚本，esbuild 平台原生二进制无法下载。
+**解决**：已在 [`frontend/pnpm-workspace.yaml`](frontend/pnpm-workspace.yaml) 中 `allowBuilds: { esbuild: true, es5-ext: true }`；如仍报错运行 `pnpm approve-builds --all`。
+
+### Q7：`uv run pytest` 报 `psycopg2 not installed`
+**原因**：测试 fixture 使用了 SQLite in-memory（`aiosqlite`），无需 PG，但有些环境没装 aiosqlite。
+**解决**：`uv sync --extra dev` 安装开发依赖（已含 aiosqlite）。
+
+### Q8：演示视频时长不对 / mmdc 渲染失败
+**原因**：视频依赖 ffmpeg（用 `imageio-ffmpeg` Python 包提供二进制），架构图依赖 `mmdc`（`@mermaid-js/mermaid-cli`）。
+**解决**：`uv pip install imageio-ffmpeg` + `npm i -g @mermaid-js/mermaid-cli`；之后 `make demo-video` / `bash docs/assets/architecture/export_mermaid.sh` 即可一键重生成。
+
+## 常见问题 (FAQ)
+
+**Q：为什么有 5 种 ANN 后端而不是只用 HNSWLIB？**
+A：HNSWLIB 召回率高但内存占用大；FAISS-IVFPQ 通过乘积量化把内存压到 1/24；Brute Force 提供准确 Recall 基线；Adaptive-HNSW 在难易查询间自适应 `ef_search` 实现"按需召回"。课程要求"实验评估"，多后端横向对比能直观展示算法权衡。详见 [`docs/benchmark_report.md`](docs/benchmark_report.md)。
+
+**Q：Adaptive-HNSW 改进策略具体是什么？**
+A：[`backend/app/services/ann/adaptive_hnsw_backend.py`](backend/app/services/ann/adaptive_hnsw_backend.py)：每个 query 首轮用较小 `ef_search`（默认 32），若 Top-K 距离的 relative gap 小于阈值则早停；否则把 `ef` 升档（×2，上限 512）重查。易查询省算力、难查询自动加召回。
+
+**Q：RAG 没有真实 OpenAI Key 能跑吗？**
+A：可以。`LLM_PROVIDER=mock`（默认）零依赖工作：[`backend/app/services/rag.py`](backend/app/services/rag.py) 的 `MockLLMClient` 用关键词词典（cell_type / tissue / disease 中英双语）做规则解析 + 模板总结。要接真实模型设 `LLM_PROVIDER=dashscope|openai` 并配 `LLM_API_KEY`。
+
+**Q：可以重复使用同一个项目名称上传两次数据集吗？**
+A：不可以。同一用户名下数据集名称唯一（A3 commit `8170fbb` 加的校验），重名上传返回 `409 数据集名称已存在`。要释放占用先删旧的，或调 `DELETE /datasets/orphan` 批量清理失败/孤儿数据集。
+
+**Q：检索接口能返回多少结果？**
+A：单次 `top_k` 上限默认 1000；超大数据集建议分批查询。条件过滤采用 post-filter（先取 `top_k * 5` 候选再用 metadata 过滤），过滤命中率太低时实际返回数可能不足 `top_k`。详见 [`backend/app/services/search.py`](backend/app/services/search.py)。
+
+**Q：怎么停掉 polish loop？**
+A：告诉 Cursor agent "stop polish loop" 或者手动 `pkill -f 'AGENT_LOOP_TICK_polish'`，agent 会接管清理。
+
 ## 提交清单（课程交付物）
 
 | 类别 | 路径 | 状态 |
