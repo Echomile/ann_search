@@ -160,6 +160,43 @@ def test_factory_dispatch(vectors: np.ndarray, queries: np.ndarray) -> None:
         assert idx.shape == (4, 5)
 
 
+def test_brute_mmap_load_consistency(
+    vectors: np.ndarray, queries: np.ndarray, tmp_path: Path
+) -> None:
+    """BruteBackend ``load`` 启用 mmap 后检索结果应与原内存索引完全一致。"""
+    brute = BruteBackend(dim=DIM, metric="l2")
+    brute.build(vectors)
+    idx1, dist1 = brute.search(queries, top_k=TOP_K)
+
+    path = tmp_path / "brute_mmap.npy"
+    brute.save(str(path))
+    reloaded = BruteBackend(dim=DIM, metric="l2")
+    reloaded.load(str(path))
+    assert isinstance(reloaded._vectors, np.memmap)
+    idx2, dist2 = reloaded.search(queries, top_k=TOP_K)
+
+    np.testing.assert_array_equal(idx1, idx2)
+    np.testing.assert_allclose(dist1, dist2, rtol=1e-5)
+
+
+def test_hnswlib_mmap_load_consistency(
+    vectors: np.ndarray, queries: np.ndarray, tmp_path: Path
+) -> None:
+    """HnswlibBackend 新版 ``load`` 走 ``allow_replace_deleted`` 分支应保持一致。"""
+    backend = HnswlibBackend(dim=DIM, metric="l2")
+    backend.build(vectors, M=16, ef_construction=200, ef_search=100)
+    idx1, _ = backend.search(queries, top_k=TOP_K)
+
+    path = tmp_path / "hnswlib_mmap.bin"
+    backend.save(str(path))
+
+    reloaded = HnswlibBackend(dim=DIM, metric="l2")
+    reloaded.set_ef(100)
+    reloaded.load(str(path))
+    idx2, _ = reloaded.search(queries, top_k=TOP_K)
+    np.testing.assert_array_equal(idx1, idx2)
+
+
 def test_cosine_metric_consistency(vectors: np.ndarray, queries: np.ndarray) -> None:
     """cosine 度量下，hnswlib / faiss-hnsw 与 brute 的 Top-1 应高度一致。"""
     brute = BruteBackend(dim=DIM, metric="cosine")

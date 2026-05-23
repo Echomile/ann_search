@@ -85,8 +85,17 @@ class BruteBackend(IndexBackend):
             np.save(fh, self._vectors, allow_pickle=False)
 
     def load(self, path: str) -> None:
-        with open(path, "rb") as fh:
-            self._vectors = np.load(fh, allow_pickle=False).astype(np.float32, copy=False)
+        """加载底库向量，启用 ``mmap_mode='r'`` 降低冷启动内存占用。
+
+        ``np.load`` 在 mmap 模式下返回 :class:`numpy.memmap`，按页惰性读取磁盘；
+        若落盘 dtype 与 ``float32`` 不一致（例如启用 F5 ``float16`` 压缩），
+        会显式 ``astype`` 拷贝一份 float32 到内存（mmap 无法跨 dtype 共享）。
+        """
+        arr = np.load(path, mmap_mode="r", allow_pickle=False)
+        if arr.dtype == np.float32:
+            self._vectors = arr
+        else:
+            self._vectors = np.asarray(arr, dtype=np.float32)
 
     def memory_mb(self) -> float:
         if self._vectors is None:

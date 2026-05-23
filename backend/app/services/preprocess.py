@@ -19,9 +19,15 @@ from typing import Any
 
 import numpy as np
 
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+_DTYPE_MAP: dict[str, type[np.floating]] = {
+    "float32": np.float32,
+    "float16": np.float16,
+}
 
 
 def compute_meta_columns(adata: Any, max_columns: int = 8) -> list[str]:
@@ -188,8 +194,12 @@ def preprocess_h5ad(h5ad_path: str | Path, dataset_dir: str | Path) -> dict[str,
     if vectors.dtype != np.float32:
         vectors = vectors.astype(np.float32, copy=False)
 
+    dtype_key = (settings.VECTORS_DTYPE or "float32").lower()
+    save_dtype = _DTYPE_MAP.get(dtype_key, np.float32)
+    vectors_to_save = vectors if save_dtype == np.float32 else vectors.astype(save_dtype, copy=False)
+
     vectors_path = out_dir / "vectors.npy"
-    np.save(vectors_path, vectors)
+    np.save(vectors_path, vectors_to_save)
 
     cell_ids = [str(cid) for cid in adata.obs_names]
     cell_ids_path = out_dir / "cell_ids.json"
@@ -229,6 +239,7 @@ def preprocess_h5ad(h5ad_path: str | Path, dataset_dir: str | Path) -> dict[str,
         "cell_count": cell_count,
         "vector_dim": vector_dim,
         "vector_source": vector_source,
+        "vector_dtype": str(np.dtype(save_dtype).name),
         "meta_columns": meta_columns,
         "umap_path": umap_path,
     }

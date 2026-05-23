@@ -401,6 +401,7 @@ def render_markdown(results: dict[str, Any], output_path: Path) -> None:
     add(f"- 并发度 = `{cfg['concurrency']}`")
     add(f"- 距离度量 = `{cfg['metric']}`")
     add(f"- 随机种子 = `{cfg['seed']}`")
+    add(f"- 向量精度 = `{cfg.get('dtype', 'float32')}`")
     add("")
 
     add("## 4. 实验结果")
@@ -589,9 +590,14 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     concurrency_list = [int(x) for x in args.concurrency.split(",") if x.strip()]
     backend_names = [x.strip() for x in args.backends.split(",") if x.strip()]
 
+    if args.dtype == "float16":
+        base = base.astype(np.float16).astype(np.float32)
+        queries = queries.astype(np.float16).astype(np.float32)
+        source_desc = f"{source_desc} | fp16 round-trip"
+
     print(
         f"配置: n={args.n} dim={dim} queries={args.queries} "
-        f"top_k={top_k_list} conc={concurrency_list} backends={backend_names}",
+        f"top_k={top_k_list} conc={concurrency_list} dtype={args.dtype} backends={backend_names}",
         flush=True,
     )
 
@@ -629,6 +635,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "concurrency": concurrency_list,
             "metric": args.metric,
             "seed": int(args.seed),
+            "dtype": args.dtype,
             "backends": backend_names,
             "data_source": source_desc,
         },
@@ -673,6 +680,13 @@ def parse_args() -> argparse.Namespace:
         "--skip-ground-truth",
         action="store_true",
         help="跳过 ground truth 计算（仅做延迟测试，召回会显示为 NaN）",
+    )
+    parser.add_argument(
+        "--dtype",
+        choices=["float32", "float16"],
+        default="float32",
+        help="向量落盘精度模拟；指定 ``float16`` 会把 base/queries 先经一次 fp16 round-trip "
+        "再喂给后端，用于评估 F5 半精度压缩对召回的影响。",
     )
     return parser.parse_args()
 

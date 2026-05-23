@@ -114,6 +114,11 @@ class HnswlibBackend(IndexBackend):
     def load(self, path: str, max_elements: int | None = None) -> None:
         """从磁盘加载 hnswlib 索引。
 
+        优先尝试启用 ``allow_replace_deleted=True`` 的新签名以便后续在线删除，
+        若运行时为旧版本 hnswlib 抛 :class:`TypeError`，则静默回退到无参签名。
+        新版 hnswlib (>=0.8) 内部 ``load_index`` 已默认使用 mmap 友好的加载路径，
+        相比早期版本可显著降低冷启动常驻内存。
+
         Args:
             path: 索引文件路径。
             max_elements: 可选，载入后的最大容量，``None`` 表示沿用文件原值。
@@ -121,11 +126,16 @@ class HnswlibBackend(IndexBackend):
         import hnswlib
 
         index = hnswlib.Index(space=_METRIC_MAP[self.metric], dim=self.dim)
-        if max_elements is None:
-            index.load_index(path)
-        else:
-            index.load_index(path, max_elements=int(max_elements))
-        index.set_ef(int(self._ef_search))
+        load_max = int(max_elements) if max_elements is not None else 0
+        try:
+            index.load_index(path, max_elements=load_max, allow_replace_deleted=True)
+        except TypeError:
+            if max_elements is None:
+                index.load_index(path)
+            else:
+                index.load_index(path, max_elements=int(max_elements))
+        if self._ef_search:
+            index.set_ef(int(self._ef_search))
         self._index = index
         self._num_elements = index.get_current_count()
 
