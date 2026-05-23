@@ -2,6 +2,22 @@
 
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
+<p align="center">
+  <a href="docs/video/demo_final.mp4"><img src="docs/assets/demo_cover.png" alt="演示视频" width="48%"/></a>
+  &nbsp;
+  <a href="docs/slides/answer_defense.pdf"><img src="docs/assets/slide_cover.png" alt="答辩 PPT" width="48%"/></a>
+</p>
+
+<p align="center">
+  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (2分42秒)</a>
+  &nbsp;·&nbsp;
+  <a href="docs/slides/answer_defense.pdf">查看答辩 PPT</a>
+  &nbsp;·&nbsp;
+  <a href="docs/benchmark_report.md">性能基准报告</a>
+  &nbsp;·&nbsp;
+  <a href="submission/MANIFEST.md">提交物清单</a>
+</p>
+
 ## 项目简介
 
 随着单细胞测序技术的发展，一次实验可产生数十万级别的细胞样本，每个样本经数值化后即为一个高维向量。传统精确最近邻搜索在高维大规模数据上效率低下，本系统基于 **近似最近邻 (ANN)** 算法（HNSW、IVF、PQ 等）实现端到端的细胞相似性检索流水线：
