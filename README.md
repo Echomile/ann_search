@@ -3,13 +3,25 @@
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
 <p align="center">
+  <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI"/>
+  <img src="https://img.shields.io/badge/tests-37%2F37%20passed-brightgreen?logo=pytest" alt="Tests"/>
+  <img src="https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white" alt="Python"/>
+  <img src="https://img.shields.io/badge/FastAPI-0.118%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
+  <img src="https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white" alt="React"/>
+  <img src="https://img.shields.io/badge/TypeScript-5.6-3178c6?logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white" alt="PostgreSQL"/>
+  <img src="https://img.shields.io/badge/Redis-7-dc382d?logo=redis&logoColor=white" alt="Redis"/>
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License"/>
+</p>
+
+<p align="center">
   <a href="docs/video/demo_final.mp4"><img src="docs/assets/demo_cover.png" alt="演示视频" width="48%"/></a>
   &nbsp;
   <a href="docs/slides/answer_defense.pdf"><img src="docs/assets/slide_cover.png" alt="答辩 PPT" width="48%"/></a>
 </p>
 
 <p align="center">
-  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (5分48秒)</a>
+  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (5分54秒)</a>
   &nbsp;·&nbsp;
   <a href="docs/slides/answer_defense.pdf">查看答辩 PPT</a>
   &nbsp;·&nbsp;
