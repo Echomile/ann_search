@@ -233,6 +233,92 @@ def step_rag(page: Page) -> None:
     page.wait_for_timeout(2000)
 
 
+def step_admin(page: Page) -> None:
+    """演示 v1.1 新增的管理员用户管理页。"""
+    page.get_by_role("menuitem", name="用户管理").click()
+    page.wait_for_url(f"{BASE_URL}/admin/users")
+    try:
+        page.wait_for_selector("table tbody tr", timeout=15_000)
+    except Exception:
+        pass
+    page.wait_for_timeout(1200)
+    page.evaluate(
+        "document.querySelector('table')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+    )
+    page.wait_for_timeout(1500)
+
+
+def step_search_log_dashboard(page: Page) -> None:
+    """演示 v1.1 新增的检索日志统计 Dashboard（评测页底部）。"""
+    page.get_by_role("menuitem", name="性能评测").click()
+    page.wait_for_url(f"{BASE_URL}/evaluation")
+    page.wait_for_timeout(1500)
+    page.evaluate(
+        """() => {
+            const cards = Array.from(document.querySelectorAll('.ant-card-head-title'));
+            const target = cards.find(el => (el.textContent || '').includes('检索日志统计'));
+            if (target) target.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }"""
+    )
+    page.wait_for_timeout(2500)
+
+
+def step_index_detail(page: Page) -> None:
+    """演示 v1.1 新增的索引详情页 /indexes/:id。"""
+    target_id = page.evaluate(
+        """async () => {
+            const token = localStorage.getItem('ann_search_token');
+            const headers = {Authorization: `Bearer ${token}`};
+            const datasets = await (await fetch('/api/v1/datasets', {headers})).json();
+            for (const ds of datasets) {
+                if (ds.status !== 'ready') continue;
+                const list = await (await fetch(`/api/v1/datasets/${ds.id}/indexes`, {headers})).json();
+                if (!Array.isArray(list)) continue;
+                const ready = list.find(x => x.status === 'ready');
+                if (ready) return ready.id;
+            }
+            return null;
+        }"""
+    )
+    if target_id:
+        print(f"[demo] index_detail target id={target_id}")
+        page.goto(f"{BASE_URL}/indexes/{target_id}")
+        try:
+            page.wait_for_selector(".ant-descriptions", timeout=15_000)
+        except Exception:
+            pass
+        page.wait_for_timeout(1500)
+        page.evaluate(
+            "document.querySelector('.ant-descriptions')?.scrollIntoView({behavior: 'smooth', block: 'center'})"
+        )
+        page.wait_for_timeout(2000)
+
+
+def step_new_search_tabs(page: Page) -> None:
+    """演示 F6 SSE 流式 Tab 与 F7 ensemble 多后端 Tab。"""
+    page.get_by_role("menuitem", name="检索").click()
+    page.wait_for_url(f"{BASE_URL}/search")
+    page.wait_for_timeout(1200)
+    try:
+        page.get_by_role("tab", name="SSE 流式").click()
+        page.wait_for_timeout(2500)
+        page.evaluate(
+            "document.querySelector('.ant-tabs-tabpane-active')?.scrollIntoView({behavior: 'smooth', block: 'start'})"
+        )
+        page.wait_for_timeout(1500)
+    except Exception:
+        pass
+    try:
+        page.get_by_role("tab", name="Ensemble 多后端").click()
+        page.wait_for_timeout(2500)
+        page.evaluate(
+            "document.querySelector('.ant-tabs-tabpane-active')?.scrollIntoView({behavior: 'smooth', block: 'start'})"
+        )
+        page.wait_for_timeout(2000)
+    except Exception:
+        pass
+
+
 def step_outro(page: Page) -> None:
     page.wait_for_timeout(2000)
 
@@ -356,7 +442,54 @@ STEPS: list[Step] = [
         action=step_rag,
     ),
     Step(
-        name="11_outro",
+        name="11_admin",
+        narration=(
+            "在迭代过程中，我们还补充了完整的管理员后台页面。"
+            "现在以管理员身份点击侧边栏的用户管理菜单进入。"
+            "这里可以查看全部账号、随时切换 user 与 admin 角色、"
+            "为忘记密码的用户生成一次性临时明文，"
+            "也支持级联删除某个用户名下的全部数据集、索引与检索日志，"
+            "数据库外键约束保证清理无残留。"
+        ),
+        action=step_admin,
+    ),
+    Step(
+        name="12_search_log_dashboard",
+        narration=(
+            "在性能评测页底部，我们新增了一个检索日志统计看板。"
+            "它会汇总所有用户发起的真实检索调用，"
+            "展示总查询数、整体平均延迟与 P95 延迟，"
+            "用双 Y 轴柱线图刻画最近 24 小时的查询量与平均延迟，"
+            "并按数据集聚合给出 P95 排行，方便定位线上的慢查询。"
+        ),
+        action=step_search_log_dashboard,
+    ),
+    Step(
+        name="13_index_detail",
+        narration=(
+            "索引管理页里每一条记录都可以点进独立的详情页。"
+            "详情页聚合展示了索引的后端、距离度量、构建耗时、内存占用、"
+            "参数 JSON、磁盘文件路径，"
+            "以及最近一次评测的多档 Recall 与并发延迟表，"
+            "方便横向对比 hnswlib、FAISS、Adaptive HNSW "
+            "在同一数据集上的真实表现。"
+        ),
+        action=step_index_detail,
+    ),
+    Step(
+        name="14_new_search_tabs",
+        narration=(
+            "检索页里也补充了两个新的检索模式。"
+            "一个是基于 Server Sent Events 的流式检索，"
+            "结果可以一边返回一边渲染，长查询不再黑屏等待。"
+            "另一个是 ensemble 多后端检索，"
+            "把同一数据集下两到五个不同索引的结果做投票融合，"
+            "每条命中都能看到是哪几个索引共同推荐的，召回率比单一后端更稳。"
+        ),
+        action=step_new_search_tabs,
+    ),
+    Step(
+        name="15_outro",
         narration=(
             "以上就是本次演示的全部内容。"
             "总结一下我们的核心交付：21 个 REST 接口、5 种 ANN 后端、"
