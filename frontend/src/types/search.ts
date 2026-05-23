@@ -77,3 +77,29 @@ export interface BatchSearchResponse {
   metric: string | null;
   groups: BatchSearchHitGroup[];
 }
+
+// 多后端 ensemble 检索（F7）：同一数据集 2~5 个 index，z-score 归一化合并
+export interface EnsembleSearchRequest {
+  dataset_id: number;
+  index_ids: number[];
+  query: BatchQueryItem;
+  top_k: number;
+  filters?: SearchFilters | null;
+}
+
+export interface EnsembleHit {
+  rank: number;
+  cell_id: string;
+  score: number;
+  voted_by: number[];
+  meta: Record<string, string | number | boolean | null> | null;
+}
+
+export interface EnsembleSearchResponse {
+  dataset_id: number;
+  top_k: number;
+  latency_ms: number;
+  hits: EnsembleHit[];
+  // 后端 schema 用 ``dict[str, float]``：key 为 ``str(index_id)``
+  per_index_latency_ms: Record<string, number>;
+}

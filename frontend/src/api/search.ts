@@ -2,6 +2,8 @@ import { httpClient, tokenStorage } from './client';
 import type {
   BatchSearchRequest,
   BatchSearchResponse,
+  EnsembleSearchRequest,
+  EnsembleSearchResponse,
   MultiDatasetSearchRequest,
   SearchByIdRequest,
   SearchByVectorRequest,
@@ -140,6 +142,11 @@ export const searchApi = {
 
   batch: async (payload: BatchSearchRequest): Promise<BatchSearchResponse> => {
     const { data } = await httpClient.post<BatchSearchResponse>('/search/batch', payload);
+    return data;
+  },
+
+  ensemble: async (payload: EnsembleSearchRequest): Promise<EnsembleSearchResponse> => {
+    const { data } = await httpClient.post<EnsembleSearchResponse>('/search/ensemble', payload);
     return data;
   },
 };
