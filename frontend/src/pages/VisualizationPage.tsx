@@ -20,7 +20,7 @@ import { Link } from 'react-router-dom';
 import { datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
 import { searchApi } from '@/api/search';
-import type { Dataset } from '@/types/dataset';
+import type { Dataset, UmapResponse } from '@/types/dataset';
 import type { IndexRecord } from '@/types/indexRecord';
 import type { SearchHit, SearchResponse } from '@/types/search';
 import { useDatasetStore } from '@/store/datasetStore';
@@ -36,9 +36,9 @@ interface FormValues {
   top_k: number;
 }
 
-// 把命中按 distance 升序排列后投射到 2D 平面：
+// 把命中按 distance 升序排列后投射到 2D 平面（兜底用）：
 // 半径用 distance 归一化，角度用 cell_id 的稳定哈希散开。
-// TODO: 后端开放 /datasets/{id}/umap 后，应改为真实坐标。
+// 仅在后端 UMAP API 返回 has_umap=false 时使用。
 const stableAngle = (s: string): number => {
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) | 0;
@@ -108,6 +108,7 @@ const VisualizationPage = () => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [indexes, setIndexes] = useState<IndexRecord[]>([]);
   const [datasetDetail, setDatasetDetail] = useState<Dataset | null>(null);
+  const [umap, setUmap] = useState<UmapResponse | null>(null);
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [colorByType, setColorByType] = useState(false);
@@ -145,6 +146,17 @@ const VisualizationPage = () => {
     }
   }, []);
 
+  const loadUmap = useCallback(async (id: number) => {
+    try {
+      const u = await datasetsApi.umap(id);
+      setUmap(u);
+    } catch (err) {
+      // 静默降级到 mock 投影
+      setUmap(null);
+      console.warn('UMAP API 调用失败，降级到 mock 投影', err);
+    }
+  }, []);
+
   useEffect(() => {
     void loadDatasets();
   }, [loadDatasets]);
@@ -158,14 +170,16 @@ const VisualizationPage = () => {
     });
     void loadIndexes(currentDataset.id);
     void loadDatasetDetail(currentDataset.id);
-  }, [currentDataset, currentIndex, form, loadIndexes, loadDatasetDetail]);
+    void loadUmap(currentDataset.id);
+  }, [currentDataset, currentIndex, form, loadIndexes, loadDatasetDetail, loadUmap]);
 
   useEffect(() => {
     if (watchedDatasetId) {
       void loadIndexes(watchedDatasetId);
       void loadDatasetDetail(watchedDatasetId);
+      void loadUmap(watchedDatasetId);
     }
-  }, [watchedDatasetId, loadIndexes, loadDatasetDetail]);
+  }, [watchedDatasetId, loadIndexes, loadDatasetDetail, loadUmap]);
 
   const handleRender = async () => {
     let v: FormValues;
@@ -207,11 +221,79 @@ const VisualizationPage = () => {
     [indexes],
   );
 
+  // cell_id -> UMAP 坐标的查找索引（O(1) 命中）
+  const umapIndex = useMemo(() => {
+    if (!umap?.has_umap || !umap.coords || !umap.cell_ids) return null;
+    const map = new Map<string, [number, number]>();
+    for (let i = 0; i < umap.cell_ids.length; i += 1) {
+      const c = umap.coords[i];
+      if (c) map.set(umap.cell_ids[i], [c[0], c[1]]);
+    }
+    return map;
+  }, [umap]);
+
   const plotData = useMemo<PlotlyData>(() => {
     const queryCell = form.getFieldValue('cell_id')?.trim?.() ?? '';
+
+    // 路径 A：真实 UMAP 坐标
+    if (umap?.has_umap && umapIndex && umap.coords && umap.cell_ids) {
+      const traces: PlotlyData = [
+        {
+          x: umap.coords.map((c) => c[0]),
+          y: umap.coords.map((c) => c[1]),
+          mode: 'markers',
+          type: 'scattergl',
+          name: `背景细胞 (${umap.coords.length.toLocaleString()})`,
+          marker: { color: 'rgba(140, 140, 140, 0.35)', size: 3 },
+          text: umap.cell_ids,
+          hovertemplate: '%{text}<extra></extra>',
+        },
+      ];
+      if (response && response.hits.length > 0) {
+        const hits = response.hits;
+        const neighborHits = hits.filter((h) => h.rank > 1);
+        const queryHits = hits.filter((h) => h.rank === 1);
+        const lookup = (cid: string) => umapIndex.get(cid);
+        const neighborCoords = neighborHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [number, number][];
+        const queryCoords = queryHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [number, number][];
+        const neighborColors = colorByType
+          ? neighborHits.map((h) => {
+              const t = h.meta?.cell_type;
+              return typeof t === 'string' ? colorByCellType(t) : '#fa8c16';
+            })
+          : '#fa8c16';
+
+        if (neighborCoords.length > 0) {
+          traces.push({
+            x: neighborCoords.map((c) => c[0]),
+            y: neighborCoords.map((c) => c[1]),
+            mode: 'markers',
+            type: 'scatter',
+            name: `Top-${neighborHits.length} 邻居`,
+            marker: { color: neighborColors, size: 11, line: { width: 1, color: '#fff' } },
+            text: neighborHits.map((h) => `${h.cell_id}<br>rank=${h.rank}<br>distance=${h.distance.toFixed(4)}`),
+            hovertemplate: '%{text}<extra></extra>',
+          });
+        }
+        if (queryCoords.length > 0) {
+          traces.push({
+            x: queryCoords.map((c) => c[0]),
+            y: queryCoords.map((c) => c[1]),
+            mode: 'markers',
+            type: 'scatter',
+            name: '查询细胞',
+            marker: { color: '#f5222d', size: 18, symbol: 'star', line: { width: 2, color: '#fff' } },
+            text: queryHits.map((h) => `${h.cell_id}<br>distance=${h.distance.toFixed(4)}`),
+            hovertemplate: '%{text}<extra></extra>',
+          });
+        }
+      }
+      return traces;
+    }
+
+    // 路径 B：mock 投影兜底
     const projected = response ? projectHits(response.hits) : [];
     const background = buildBackground(queryCell || 'noquery');
-
     const traces: PlotlyData = [
       {
         x: background.map((p) => p.x),
@@ -224,26 +306,19 @@ const VisualizationPage = () => {
         hovertemplate: 'background %{text}<extra></extra>',
       },
     ];
-
     if (projected.length > 0) {
       const neighborPoints = projected.filter((p) => p.rank > 1);
       const queryPoints = projected.filter((p) => p.rank === 1);
-
       const neighborColors = colorByType
         ? neighborPoints.map((p) => (p.cell_type ? colorByCellType(p.cell_type) : '#fa8c16'))
         : '#fa8c16';
-
       traces.push({
         x: neighborPoints.map((p) => p.x),
         y: neighborPoints.map((p) => p.y),
         mode: 'markers',
         type: 'scatter',
         name: `Top-${neighborPoints.length} 邻居`,
-        marker: {
-          color: neighborColors,
-          size: 10,
-          line: { width: 1, color: '#fff' },
-        },
+        marker: { color: neighborColors, size: 10, line: { width: 1, color: '#fff' } },
         text: neighborPoints.map(
           (p) =>
             `${p.cell_id}<br>rank=${p.rank}<br>distance=${p.distance.toFixed(4)}` +
@@ -251,7 +326,6 @@ const VisualizationPage = () => {
         ),
         hovertemplate: '%{text}<extra></extra>',
       });
-
       traces.push({
         x: queryPoints.map((p) => p.x),
         y: queryPoints.map((p) => p.y),
@@ -264,17 +338,18 @@ const VisualizationPage = () => {
       });
     }
     return traces;
-  }, [response, colorByType, form]);
+  }, [umap, umapIndex, response, colorByType, form]);
 
-  const plotLayout = useMemo(
-    () => ({
-      title: { text: '查询 + Top-K 邻居 (2D mock 投影)' },
-      xaxis: { title: { text: 'mock-x' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
-      yaxis: { title: { text: 'mock-y' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
+  const plotLayout = useMemo(() => {
+    const useReal = umap?.has_umap === true;
+    return {
+      title: { text: useReal ? '细胞 UMAP 散点图 + Top-K 邻居' : '查询 + Top-K 邻居 (2D mock 投影)' },
+      xaxis: { title: { text: useReal ? 'UMAP-1' : 'mock-x' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
+      yaxis: { title: { text: useReal ? 'UMAP-2' : 'mock-y' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
       legend: { orientation: 'h' as const, y: -0.18 },
-    }),
-    [],
-  );
+      margin: { l: 50, r: 30, t: 40, b: 60 },
+    };
+  }, [umap]);
 
   if (!currentDataset && datasets.length === 0) {
     return (
@@ -300,7 +375,8 @@ const VisualizationPage = () => {
     <div>
       <Title level={3}>结果可视化</Title>
       <Paragraph type="secondary">
-        基于 Plotly 渲染 2D 散点图：当前后端尚未暴露 UMAP 坐标，因此先用 distance 投影做演示。
+        基于 Plotly 渲染细胞 UMAP 2D 散点图：背景显示数据集全部细胞的 UMAP 投影，
+        发起 cell_id 检索后会用红色五角星高亮查询细胞、橙色高亮 Top-K 邻居。
       </Paragraph>
 
       <Card style={{ marginBottom: 24 }}>
@@ -364,13 +440,22 @@ const VisualizationPage = () => {
       )}
 
       <Card title="散点图">
-        <Alert
-          type="warning"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message="当前为 demo 投影：散点位置由 distance 与 cell_id 哈希生成；待后端实现 /datasets/{id}/umap 后即可换成真实 UMAP 坐标。"
-        />
-        <PlotlyChart data={plotData} layout={plotLayout} height={520} loading={loading} />
+        {umap?.has_umap ? (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={`真实 UMAP 散点（${umap.coords?.length.toLocaleString()} 点${umap.sampled ? `，已从 ${umap.total_cells.toLocaleString()} 下采样` : ''}）`}
+          />
+        ) : (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="未检测到 UMAP 坐标文件，散点位置由 distance + cell_id 哈希兜底生成"
+          />
+        )}
+        <PlotlyChart data={plotData} layout={plotLayout} height={620} loading={loading} />
       </Card>
     </div>
   );

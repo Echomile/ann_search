@@ -14,7 +14,6 @@ import {
   Space,
   Table,
   Tabs,
-  Tag,
   Typography,
   message,
 } from 'antd';
@@ -28,6 +27,7 @@ import type { IndexRecord } from '@/types/indexRecord';
 import type { SearchFilters, SearchHit, SearchResponse } from '@/types/search';
 import { useDatasetStore } from '@/store/datasetStore';
 import { formatDuration } from '@/utils/format';
+import { renderMetadataTags } from '@/utils/metadata';
 import { extractError } from '@/utils/error';
 
 const { Title, Paragraph, Text } = Typography;
@@ -91,17 +91,8 @@ const parseVector = (text: string): number[] => {
     .map((token) => Number(token));
 };
 
-// 单条结果展开行内 metadata 折叠展示
-const renderMeta = (meta: SearchHit['meta']) => {
-  if (!meta || Object.keys(meta).length === 0) return <Text type="secondary">-</Text>;
-  return (
-    <Space size={[4, 4]} wrap>
-      {Object.entries(meta).map(([k, v]) => (
-        <Tag key={k} color="geekblue">{`${k}: ${String(v)}`}</Tag>
-      ))}
-    </Space>
-  );
-};
+// metadata 折叠：重要字段优先 + "+N 更多" Popover，避免 56 列 Tag 撑满行
+const renderMeta = (meta: SearchHit['meta']) => renderMetadataTags(meta);
 
 const SearchPage = () => {
   const currentDataset = useDatasetStore((s) => s.currentDataset);
