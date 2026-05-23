@@ -14,10 +14,11 @@ COMPOSE_DEV   := docker compose -f infra/docker-compose.yml -f infra/docker-comp
         backend-shell worker-shell db-shell redis-shell \
         migrate makemigration test test-backend test-frontend \
         lint lint-backend lint-frontend format format-backend format-frontend \
-        install install-backend install-frontend clean clean-cache prune
+        install install-backend install-frontend clean clean-cache prune \
+        e2e demo-video slides submission benchmark
 
 help: ## 列出全部可用命令
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # ============ Docker Compose ============
 up: ## 启动开发栈（含热重载）
@@ -111,3 +112,21 @@ clean-cache: ## 清理 Python / 前端缓存
 prune: ## 移除 docker 卷与镜像（危险）
 	$(COMPOSE) down -v --remove-orphans
 	docker system prune -f
+
+# ============ 课程交付物 ============
+e2e: ## 跑端到端真实数据测试（注入 liver.h5ad）
+	cd backend && uv run python ../e2e/test_liver_e2e.py
+
+demo-video: ## 自动录制带中文配音的演示视频 -> docs/video/demo_final.mp4
+	cd backend && uv run python ../e2e/demo_video.py
+
+slides: ## 重新生成答辩 PPT (PDF + PPTX) by Marp
+	marp docs/slides/answer_defense.md -o docs/slides/answer_defense.pdf --allow-local-files
+	marp docs/slides/answer_defense.md -o docs/slides/answer_defense.pptx --allow-local-files
+
+benchmark: ## 跑性能基准并自动生成报告
+	cd backend && uv run python scripts/benchmark.py --n 30000 --dim 30 --use-liver
+
+submission: ## 打包源代码归档到 submission/source.zip
+	git archive --format=zip --prefix=ann_search/ HEAD -o submission/source.zip
+	@echo "  -> submission/source.zip ($$(du -h submission/source.zip | cut -f1))"
