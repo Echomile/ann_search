@@ -160,11 +160,50 @@ cd backend
 uv run arq app.tasks.worker.WorkerSettings
 ```
 
-## 加分功能
+## 加分功能（全部实现）
 
-- **多数据集联合检索**：支持上传多个 `.h5ad` 数据集并合并构建联合索引，跨数据集返回 Top-K。
-- **ANN 算法改进**：基线提供 FAISS-Flat / FAISS-IVF / HNSW，并在 `services/index_engines/` 下扩展自研算法，统一评测召回率、QPS、内存占用。
-- **RAG + 单细胞 LLM 问答**：通过自然语言（如「肝脏中类似肝细胞的细胞」）触发语义解析 -> 元数据过滤 -> ANN 检索 -> LLM 总结的混合检索流程。
+- **多数据集联合检索**：`POST /api/v1/search/multi-dataset` 用 `asyncio.gather` 并发查询多个数据集索引，按 min-max 归一化重排后返回全局 Top-K（每条结果附带 `source_dataset_id`）。
+- **ANN 算法改进**：`AdaptiveHnswBackend`（[`backend/app/services/ann/adaptive_hnsw_backend.py`](backend/app/services/ann/adaptive_hnsw_backend.py)）继承 HNSWLIB，按查询难度自适应调整 `ef_search`（首轮小 ef + relative gap 早停 → 升档至上限 512），对易查询省算力、难查询自动加召回。
+- **RAG + 单细胞 LLM 问答**：`POST /api/v1/rag/query` 三段式 parse → search → summarize；后端实现 `MockLLMClient`（默认零依赖）、`DashScopeLLMClient`、`OpenAILLMClient` 三种客户端可切换。
+
+## 实测性能（liver.h5ad 真实数据集）
+
+数据集规模：69032 细胞 × 30 维 PCA 向量；测试机：MacBook（Apple Silicon）。
+
+| 后端 | 构建耗时 | 内存 | Recall@10 | p50 延迟 |
+| --- | ---: | ---: | ---: | ---: |
+| brute | 0.000 s | 3.4 MB | 1.0000 | 0.582 ms |
+| **hnswlib** | **0.218 s** | 7.1 MB | **0.9996** | **0.016 ms** |
+| faiss-hnsw | 0.252 s | 3.4 MB | 0.9976 | 0.017 ms |
+| faiss-ivfpq | 0.187 s | **0.29 MB** | 0.8046 | 0.018 ms |
+| adaptive-hnsw | 0.218 s | 7.1 MB | 0.9994 | 0.045 ms |
+
+完整报告：[`docs/benchmark_report.md`](docs/benchmark_report.md)。
+
+## 演示资源
+
+- **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（2 分 42 秒，1440×900，自动化 Playwright 录制 + macOS Tingting 中文配音）。
+- **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（18 张幻灯片，Marp Markdown 一键生成）。
+- **配音讲稿**：[`docs/slides/speaker_notes.md`](docs/slides/speaker_notes.md)
+- **端到端测试脚本**：[`e2e/test_liver_e2e.py`](e2e/test_liver_e2e.py)（注入 1.3 GB liver.h5ad 全流程验证） · [`e2e/demo_video.py`](e2e/demo_video.py)（视频自动录制）
+- **9 张实测截图**：[`docs/e2e_screenshots/`](docs/e2e_screenshots/)
+
+## 提交清单（课程交付物）
+
+| 类别 | 路径 | 状态 |
+| --- | --- | :---: |
+| 源代码（前后端） | `backend/` · `frontend/` · `infra/` | ✅ |
+| 开发文档 — 项目概述 | [`docs/01_项目概述.md`](docs/01_项目概述.md) | ✅ |
+| 开发文档 — 需求与设计 | [`docs/02_需求分析与系统设计.md`](docs/02_需求分析与系统设计.md) | ✅ |
+| 开发文档 — 系统测试 | [`docs/03_系统测试.md`](docs/03_系统测试.md) | ✅ |
+| 开发文档 — 项目管理 | [`docs/04_项目管理.md`](docs/04_项目管理.md) | ✅ |
+| 开发文档 — 用户手册 | [`docs/05_用户手册.md`](docs/05_用户手册.md) | ✅ |
+| API 接口文档 | [`docs/06_API接口文档.md`](docs/06_API接口文档.md) | ✅ |
+| 性能基准报告 | [`docs/benchmark_report.md`](docs/benchmark_report.md) | ✅ |
+| 答辩 PPT (PDF/PPTX) | [`docs/slides/`](docs/slides/) | ✅ |
+| 演示视频 | [`docs/video/demo_final.mp4`](docs/video/demo_final.mp4) | ✅ |
+| 端到端测试 | [`e2e/`](e2e/) | ✅ |
+| CI/CD | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | ✅ |
 
 ## 常用命令
 
