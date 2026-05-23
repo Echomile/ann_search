@@ -1,6 +1,6 @@
 # 六、API 接口文档
 
-> 本文是 **21 个 REST 接口** 的速查文档，便于团队对照与第三方集成。
+> 本文是 **31 个 REST 接口** 的速查文档（含管理员 / 缓存 / 统计 / 进度等运维接口），便于团队对照与第三方集成。
 >
 > - **完整 OpenAPI 规范**：<http://localhost:8000/openapi.json>
 > - **交互式 Swagger UI**：<http://localhost:8000/docs>
@@ -761,3 +761,100 @@ curl -X POST http://localhost:8000/api/v1/rag/query \
 | `ParsedQuery` | `cell_id`, `filters`, `top_k=10`, `intent` |
 
 > 如需机器可读的完整 schema，请直接拉取 `/openapi.json` 并配合 `openapi-typescript` / `openapi-python-client` 生成客户端代码；本仓库前端 `frontend/src/api/*.ts` 即采用该方式生成 + 手工微调。
+
+## 6.10 v1.1 新增接口（管理员 / 缓存 / 进度 / 可视化）
+
+### 6.10.1 数据集进阶
+
+| 方法 | 路径 | 摘要 | 备注 |
+| --- | --- | --- | --- |
+| `PATCH` | `/datasets/{dataset_id}` | 重命名数据集 | body `{name}`；同名 409；非拥有者 403 |
+| `DELETE` | `/datasets/orphan` | 批量清理失败 / 孤儿数据集 | 当前用户名下 `status=failed` 或缺失向量文件的全部清理，返回 `{deleted_ids, count}` |
+| `GET` | `/datasets/{dataset_id}/upload-progress` | 上传 / 写盘进度 | 返回 `{status, bytes_received, total_bytes, percent}`；预处理阶段 `total_bytes=null` 用 indeterminate spinner |
+| `GET` | `/datasets/{dataset_id}/umap` | 真实 UMAP 2D 坐标 | 返回 `{has_umap, coords: number[][], cell_ids, sampled, total_cells}`；N > 5 万自动下采样；文件缺失返回 `has_umap=false` + 200 |
+
+curl 示例：
+
+```bash
+# 重命名
+curl -X PATCH "$API/datasets/3" -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' -d '{"name":"liver_v2"}'
+
+# 清理失败数据集
+curl -X DELETE "$API/datasets/orphan" -H "Authorization: Bearer $TOKEN"
+
+# 实时进度（前端 500ms 轮询）
+curl "$API/datasets/3/upload-progress" -H "Authorization: Bearer $TOKEN"
+
+# UMAP 散点
+curl "$API/datasets/3/umap" -H "Authorization: Bearer $TOKEN" | jq '.coords | length'
+```
+
+### 6.10.2 索引进阶
+
+| 方法 | 路径 | 摘要 | 备注 |
+| --- | --- | --- | --- |
+| `GET` | `/indexes/cache/stats` | 进程内 LRU 缓存命中率 | 返回 `{capacity, size, hits, misses, loads, evictions, hit_ratio, cached_index_ids}` |
+| `GET` | `/indexes/{index_id}/latest-benchmark` | 索引视角读最近评测 | 与 `/evaluation/{index_id}/latest` 等价但走 indexes 路由；无评测返回 `{has_benchmark: false}` + 200 |
+
+### 6.10.3 检索日志统计
+
+| 方法 | 路径 | 摘要 | 备注 |
+| --- | --- | --- | --- |
+| `GET` | `/stats/search?dataset_id=` | 检索日志聚合 | 总查询数 / 平均 / P95 延迟 + 按数据集聚合 + 最近 24h 每小时桶；`dataset_id` 可选 |
+
+返回示例（节选）：
+
+```json
+{
+  "total_queries": 5,
+  "overall_avg_latency_ms": 42.0,
+  "overall_p95_latency_ms": 89.99,
+  "by_dataset": [
+    {"dataset_id": 1, "dataset_name": "liver_demo", "total_queries": 4, "avg_latency_ms": 40.0, "p95_latency_ms": 89.49}
+  ],
+  "hourly_24h": [
+    {"hour_iso": "2026-05-23T01:00:00+00:00", "queries": 0, "avg_latency_ms": 0.0},
+    "... 共 24 项 ..."
+  ]
+}
+```
+
+### 6.10.4 管理员（admin）
+
+全部接口需 `current_user.role == "admin"`，否则 403。
+
+| 方法 | 路径 | 摘要 | 备注 |
+| --- | --- | --- | --- |
+| `GET` | `/admin/users` | 列出全部用户 | 返回 `UserOut[]`（不含密码） |
+| `PATCH` | `/admin/users/{user_id}` | 修改角色 | body `{role: "admin"\|"user"}`；改自己 403 |
+| `DELETE` | `/admin/users/{user_id}` | 删除用户 | 级联清理数据集 / 索引 / 检索日志 + 磁盘文件；删自己 403 |
+| `POST` | `/admin/users/{user_id}/reset-password` | 重置密码 | 服务端生成 12 字符随机密码，bcrypt 入库，**仅本次返回**明文 `temp_password` |
+
+curl 示例：
+
+```bash
+# 提升为管理员
+curl -X PATCH "$API/admin/users/2" -H "Authorization: Bearer $ADMIN" \
+     -H 'Content-Type: application/json' -d '{"role":"admin"}'
+
+# 重置密码（一次性）
+curl -X POST "$API/admin/users/2/reset-password" -H "Authorization: Bearer $ADMIN"
+# -> {"user_id":2,"temp_password":"sjpmieh1yXAq"}
+```
+
+## 6.11 接口总览（31 个）
+
+| 模块 | 数量 | 路径前缀 |
+| --- | ---: | --- |
+| 健康检查 | 1 | `/health` |
+| 用户认证 | 3 | `/auth/*` |
+| 管理员（admin） | 4 | `/admin/users*` |
+| 数据集（含 v1.1 新增 4 个） | 9 | `/datasets/*` |
+| 索引（含 v1.1 新增 2 个） | 7 | `/datasets/{id}/indexes`, `/indexes/*` |
+| 检索 | 3 | `/search/*` |
+| 评测 | 3 | `/evaluation/*` |
+| 检索日志统计 | 1 | `/stats/search` |
+| RAG | 1 | `/rag/query` |
+| **合计** | **31** | — |
+
