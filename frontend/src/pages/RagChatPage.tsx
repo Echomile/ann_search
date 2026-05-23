@@ -265,8 +265,8 @@ const RagChatPage = () => {
         <Paragraph style={{ marginBottom: 0 }}>
           RAG（Retrieval-Augmented Generation）流程：
           <Text strong> 自然语言查询 </Text>→<Text strong> LLM 解析 </Text>→
-          <Text strong> ANN 向量检索 </Text>→<Text strong> 自然语言总结</Text>。
-          示例：&ldquo;找出 T cell 中和 AAACATAC-1 最相似的 5 个细胞&rdquo;。
+          <Text strong> ANN 向量检索 </Text>→<Text strong> 自然语言总结</Text>。 示例：&ldquo;找出 T
+          cell 中和 AAACATAC-1 最相似的 5 个细胞&rdquo;。
         </Paragraph>
       </Card>
 
@@ -304,10 +304,7 @@ const RagChatPage = () => {
               dataSource={entries}
               split={false}
               renderItem={(entry) => (
-                <List.Item
-                  key={entry.id}
-                  style={{ display: 'block', padding: '8px 0', border: 0 }}
-                >
+                <List.Item key={entry.id} style={{ display: 'block', padding: '8px 0', border: 0 }}>
                   <div
                     style={{
                       display: 'flex',

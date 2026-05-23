@@ -67,8 +67,7 @@ const LoginPage = () => {
             </Button>
           </Form.Item>
           <div style={{ textAlign: 'center' }}>
-            <Text type="secondary">还没有账号？</Text>{' '}
-            <Link to="/register">立即注册</Link>
+            <Text type="secondary">还没有账号？</Text> <Link to="/register">立即注册</Link>
           </div>
         </Form>
       </Card>

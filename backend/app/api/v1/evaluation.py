@@ -145,5 +145,3 @@ async def list_results(dataset_id: int | None = None) -> list[dict[str, Any]]:
             }
         )
     return out
-
-

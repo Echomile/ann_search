@@ -39,9 +39,7 @@ const isPresent = (v: unknown): boolean => v !== null && v !== undefined && v !=
  * @param meta - 任意 metadata 字典；可为 null/undefined。
  * @returns ReactNode 可直接放在 Table 列 / Card 中。
  */
-export const renderMetadataTags = (
-  meta: Record<string, unknown> | null | undefined,
-): ReactNode => {
+export const renderMetadataTags = (meta: Record<string, unknown> | null | undefined): ReactNode => {
   const entries = Object.entries(meta ?? {});
   if (entries.length === 0) return <Text type="secondary">-</Text>;
 

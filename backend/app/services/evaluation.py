@@ -46,9 +46,7 @@ def compute_recall(
     if truth.ndim == 1:
         truth = truth[None, :]
     if approx.shape[0] != truth.shape[0]:
-        raise ValueError(
-            f"approx/ground_truth 查询数不一致: {approx.shape[0]} vs {truth.shape[0]}"
-        )
+        raise ValueError(f"approx/ground_truth 查询数不一致: {approx.shape[0]} vs {truth.shape[0]}")
     k_eff = min(k, approx.shape[1], truth.shape[1])
     if k_eff <= 0:
         return 0.0
@@ -259,9 +257,9 @@ async def _percentile_via_sql_or_numpy(
     frac = float(percentile) / 100.0
     try:
         value = await db.scalar(
-            select(
-                func.percentile_cont(frac).within_group(SearchLog.latency_ms.asc())
-            ).where(*base_filter, SearchLog.latency_ms.isnot(None))
+            select(func.percentile_cont(frac).within_group(SearchLog.latency_ms.asc())).where(
+                *base_filter, SearchLog.latency_ms.isnot(None)
+            )
         )
         return float(value) if value is not None else 0.0
     except Exception as exc:  # noqa: BLE001
@@ -269,12 +267,14 @@ async def _percentile_via_sql_or_numpy(
         await db.rollback()
 
     latencies_raw = (
-        await db.execute(
-            select(SearchLog.latency_ms).where(
-                *base_filter, SearchLog.latency_ms.isnot(None)
+        (
+            await db.execute(
+                select(SearchLog.latency_ms).where(*base_filter, SearchLog.latency_ms.isnot(None))
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     latencies = [float(v) for v in latencies_raw if v is not None]
     if not latencies:
         return 0.0
@@ -360,9 +360,7 @@ async def compute_search_log_stats(
         )
 
     naive_now = _to_naive_utc(now)
-    bucket_starts: list[datetime] = [
-        naive_now - timedelta(hours=24 - i) for i in range(24)
-    ]
+    bucket_starts: list[datetime] = [naive_now - timedelta(hours=24 - i) for i in range(24)]
     bucket_counts = [0] * 24
     bucket_lats: list[list[float]] = [[] for _ in range(24)]
 

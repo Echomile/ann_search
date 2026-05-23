@@ -110,7 +110,7 @@ def _extract_cell_id(text: str) -> str | None:
         flags=re.IGNORECASE,
     )
     if m:
-        return m.group(1).strip(' "\'')
+        return m.group(1).strip(" \"'")
     return None
 
 
@@ -209,13 +209,17 @@ def _safe_json_loads(payload: str) -> dict[str, Any]:
         raise
 
 
-def _coerce_parsed(raw: dict[str, Any], available_filters: list[str], default_top_k: int) -> ParsedQuery:
+def _coerce_parsed(
+    raw: dict[str, Any], available_filters: list[str], default_top_k: int
+) -> ParsedQuery:
     """把 LLM 返回的 dict 规范化为 :class:`ParsedQuery`。"""
     filters_raw = raw.get("filters") or {}
     if not isinstance(filters_raw, dict):
         filters_raw = {}
     allowed = set(available_filters)
-    filters = {k: v for k, v in filters_raw.items() if k in allowed and isinstance(v, (str, int, float))}
+    filters = {
+        k: v for k, v in filters_raw.items() if k in allowed and isinstance(v, (str, int, float))
+    }
     top_k_raw = raw.get("top_k") or default_top_k
     try:
         top_k = max(1, min(int(top_k_raw), 100))
@@ -277,7 +281,7 @@ class DashScopeLLMClient:
         prompt = (
             f"available_filters = {available_filters}\n"
             f"用户问题: {query}\n"
-            "请仅返回 JSON，例如 {\"cell_id\": null, \"filters\": {\"cell_type\": \"hepatocyte\"}, \"top_k\": 10, \"intent\": \"...\"}"
+            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, "top_k": 10, "intent": "..."}'
         )
         try:
             raw_text = self._call(prompt)
@@ -341,10 +345,12 @@ class OpenAILLMClient:
         prompt = (
             f"available_filters = {available_filters}\n"
             f"用户问题: {query}\n"
-            "请仅返回 JSON，例如 {\"cell_id\": null, \"filters\": {\"cell_type\": \"hepatocyte\"}, \"top_k\": 10, \"intent\": \"...\"}"
+            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, "top_k": 10, "intent": "..."}'
         )
         try:
-            return _coerce_parsed(_safe_json_loads(self._call(prompt)), available_filters, default_top_k=10)
+            return _coerce_parsed(
+                _safe_json_loads(self._call(prompt)), available_filters, default_top_k=10
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("OpenAI parse_query 失败，回退 mock: %s", exc)
             return MockLLMClient().parse_query(query, available_filters)
@@ -434,9 +440,7 @@ async def _pick_index_record(
     return record
 
 
-def _first_filter_match_index(
-    metadata: Any, filters: dict[str, Any]
-) -> int | None:
+def _first_filter_match_index(metadata: Any, filters: dict[str, Any]) -> int | None:
     """返回 metadata 中首条命中 ``filters`` 的行索引，没有则返回 ``None``。"""
     if metadata is None or len(metadata) == 0 or not filters:
         return None

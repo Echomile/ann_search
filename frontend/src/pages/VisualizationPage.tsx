@@ -216,8 +216,7 @@ const VisualizationPage = () => {
   );
 
   const indexOptions = useMemo(
-    () =>
-      indexes.map((i) => ({ label: `#${i.id} · ${i.backend} · ${i.metric}`, value: i.id })),
+    () => indexes.map((i) => ({ label: `#${i.id} · ${i.backend} · ${i.metric}`, value: i.id })),
     [indexes],
   );
 
@@ -254,8 +253,14 @@ const VisualizationPage = () => {
         const neighborHits = hits.filter((h) => h.rank > 1);
         const queryHits = hits.filter((h) => h.rank === 1);
         const lookup = (cid: string) => umapIndex.get(cid);
-        const neighborCoords = neighborHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [number, number][];
-        const queryCoords = queryHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [number, number][];
+        const neighborCoords = neighborHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [
+          number,
+          number,
+        ][];
+        const queryCoords = queryHits.map((h) => lookup(h.cell_id)).filter(Boolean) as [
+          number,
+          number,
+        ][];
         const neighborColors = colorByType
           ? neighborHits.map((h) => {
               const t = h.meta?.cell_type;
@@ -271,7 +276,9 @@ const VisualizationPage = () => {
             type: 'scatter',
             name: `Top-${neighborHits.length} 邻居`,
             marker: { color: neighborColors, size: 11, line: { width: 1, color: '#fff' } },
-            text: neighborHits.map((h) => `${h.cell_id}<br>rank=${h.rank}<br>distance=${h.distance.toFixed(4)}`),
+            text: neighborHits.map(
+              (h) => `${h.cell_id}<br>rank=${h.rank}<br>distance=${h.distance.toFixed(4)}`,
+            ),
             hovertemplate: '%{text}<extra></extra>',
           });
         }
@@ -282,7 +289,12 @@ const VisualizationPage = () => {
             mode: 'markers',
             type: 'scatter',
             name: '查询细胞',
-            marker: { color: '#f5222d', size: 18, symbol: 'star', line: { width: 2, color: '#fff' } },
+            marker: {
+              color: '#f5222d',
+              size: 18,
+              symbol: 'star',
+              line: { width: 2, color: '#fff' },
+            },
             text: queryHits.map((h) => `${h.cell_id}<br>distance=${h.distance.toFixed(4)}`),
             hovertemplate: '%{text}<extra></extra>',
           });
@@ -343,9 +355,21 @@ const VisualizationPage = () => {
   const plotLayout = useMemo(() => {
     const useReal = umap?.has_umap === true;
     return {
-      title: { text: useReal ? '细胞 UMAP 散点图 + Top-K 邻居' : '查询 + Top-K 邻居 (2D mock 投影)' },
-      xaxis: { title: { text: useReal ? 'UMAP-1' : 'mock-x' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
-      yaxis: { title: { text: useReal ? 'UMAP-2' : 'mock-y' }, zeroline: false, showgrid: true, gridcolor: '#f0f0f0' },
+      title: {
+        text: useReal ? '细胞 UMAP 散点图 + Top-K 邻居' : '查询 + Top-K 邻居 (2D mock 投影)',
+      },
+      xaxis: {
+        title: { text: useReal ? 'UMAP-1' : 'mock-x' },
+        zeroline: false,
+        showgrid: true,
+        gridcolor: '#f0f0f0',
+      },
+      yaxis: {
+        title: { text: useReal ? 'UMAP-2' : 'mock-y' },
+        zeroline: false,
+        showgrid: true,
+        gridcolor: '#f0f0f0',
+      },
       legend: { orientation: 'h' as const, y: -0.18 },
       margin: { l: 50, r: 30, t: 40, b: 60 },
     };
@@ -375,8 +399,8 @@ const VisualizationPage = () => {
     <div>
       <Title level={3}>结果可视化</Title>
       <Paragraph type="secondary">
-        基于 Plotly 渲染细胞 UMAP 2D 散点图：背景显示数据集全部细胞的 UMAP 投影，
-        发起 cell_id 检索后会用红色五角星高亮查询细胞、橙色高亮 Top-K 邻居。
+        基于 Plotly 渲染细胞 UMAP 2D 散点图：背景显示数据集全部细胞的 UMAP 投影， 发起 cell_id
+        检索后会用红色五角星高亮查询细胞、橙色高亮 Top-K 邻居。
       </Paragraph>
 
       <Card style={{ marginBottom: 24 }}>
@@ -384,7 +408,12 @@ const VisualizationPage = () => {
           <Row gutter={16}>
             <Col xs={24} md={6}>
               <Form.Item label="数据集" name="dataset_id" rules={[{ required: true }]}>
-                <Select options={datasetOptions} placeholder="选择数据集" showSearch optionFilterProp="label" />
+                <Select
+                  options={datasetOptions}
+                  placeholder="选择数据集"
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={6}>

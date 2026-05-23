@@ -64,12 +64,13 @@ def dataset_artifacts(tmp_path: Path) -> tuple[Path, list[str]]:
     rng = np.random.default_rng(0)
     vectors = rng.normal(size=(n, dim)).astype(np.float32)
     cell_ids = [f"cell_{i:03d}" for i in range(n)]
-    cell_types = ["hepatocyte" if i % 3 == 0 else ("endothelial" if i % 3 == 1 else "macrophage") for i in range(n)]
+    cell_types = [
+        "hepatocyte" if i % 3 == 0 else ("endothelial" if i % 3 == 1 else "macrophage")
+        for i in range(n)
+    ]
     tissues = ["liver"] * n
     diseases = ["normal" if i % 4 != 0 else "fibrosis" for i in range(n)]
-    metadata = pd.DataFrame(
-        {"cell_type": cell_types, "tissue": tissues, "disease": diseases}
-    )
+    metadata = pd.DataFrame({"cell_type": cell_types, "tissue": tissues, "disease": diseases})
 
     dataset_dir = tmp_path / "ds1"
     dataset_dir.mkdir()
@@ -125,9 +126,24 @@ def test_mock_summarize_non_empty_for_empty_hits() -> None:
 def test_mock_summarize_aggregates_cell_types() -> None:
     """模板总结应包含命中数量与最高频细胞类型。"""
     hits = [
-        {"rank": 1, "cell_id": "c1", "distance": 0.1, "meta": {"cell_type": "hepatocyte", "tissue": "liver"}},
-        {"rank": 2, "cell_id": "c2", "distance": 0.2, "meta": {"cell_type": "hepatocyte", "tissue": "liver"}},
-        {"rank": 3, "cell_id": "c3", "distance": 0.3, "meta": {"cell_type": "endothelial", "tissue": "liver"}},
+        {
+            "rank": 1,
+            "cell_id": "c1",
+            "distance": 0.1,
+            "meta": {"cell_type": "hepatocyte", "tissue": "liver"},
+        },
+        {
+            "rank": 2,
+            "cell_id": "c2",
+            "distance": 0.2,
+            "meta": {"cell_type": "hepatocyte", "tissue": "liver"},
+        },
+        {
+            "rank": 3,
+            "cell_id": "c3",
+            "distance": 0.3,
+            "meta": {"cell_type": "endothelial", "tissue": "liver"},
+        },
     ]
     answer = MockLLMClient().summarize("找肝细胞", hits=hits)
     assert "3" in answer

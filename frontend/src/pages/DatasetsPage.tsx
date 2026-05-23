@@ -27,11 +27,7 @@ import {
   LoadingOutlined,
 } from '@ant-design/icons';
 import { datasetsApi } from '@/api/datasets';
-import type {
-  Dataset,
-  DatasetStatusName,
-  UploadProgressResponse,
-} from '@/types/dataset';
+import type { Dataset, DatasetStatusName, UploadProgressResponse } from '@/types/dataset';
 import { useDatasetStore } from '@/store/datasetStore';
 import { datasetStatusColor, formatDateTime } from '@/utils/format';
 import { extractError } from '@/utils/error';
@@ -85,10 +81,7 @@ const renderSubmitLabel = (
 /**
  * 渲染后端进度条的 ``label`` 文案。
  */
-const renderBackendLabel = (
-  phase: UploadPhase,
-  backend: UploadProgressResponse | null,
-): string => {
+const renderBackendLabel = (phase: UploadPhase, backend: UploadProgressResponse | null): string => {
   if (phase === 'preprocessing') return 'Scanpy 预处理中（PCA / UMAP）';
   if (phase === 'done') return '后端处理完成';
   if (backend?.total_bytes != null) return '后端写盘进度（bytes_received / total_bytes）';
@@ -109,12 +102,7 @@ const renderBackendProgress = (
   hasError: boolean,
 ): JSX.Element => {
   if (phase === 'done') {
-    return (
-      <Progress
-        percent={100}
-        status={hasError ? 'exception' : 'success'}
-      />
-    );
+    return <Progress percent={100} status={hasError ? 'exception' : 'success'} />;
   }
   if (phase === 'preprocessing') {
     return (
@@ -413,9 +401,7 @@ const DatasetsPage = () => {
       dataIndex: 'status',
       key: 'status',
       width: 140,
-      render: (status: DatasetStatusName) => (
-        <Tag color={datasetStatusColor(status)}>{status}</Tag>
-      ),
+      render: (status: DatasetStatusName) => <Tag color={datasetStatusColor(status)}>{status}</Tag>,
     },
     {
       title: '创建时间',
@@ -464,7 +450,8 @@ const DatasetsPage = () => {
     <div>
       <Title level={3}>数据集</Title>
       <Paragraph type="secondary">
-        管理 .h5ad 单细胞数据集：拖拽上传后端会自动预处理；选中某行即可在索引 / 检索 / 可视化页面继续使用。
+        管理 .h5ad 单细胞数据集：拖拽上传后端会自动预处理；选中某行即可在索引 / 检索 /
+        可视化页面继续使用。
       </Paragraph>
 
       <Card title="上传数据集" style={{ marginBottom: 24 }}>
@@ -491,13 +478,7 @@ const DatasetsPage = () => {
                 <Steps
                   size="small"
                   current={PHASE_TO_STEP_INDEX[uploadPhase]}
-                  status={
-                    uploadHasError
-                      ? 'error'
-                      : uploadPhase === 'done'
-                        ? 'finish'
-                        : 'process'
-                  }
+                  status={uploadHasError ? 'error' : uploadPhase === 'done' ? 'finish' : 'process'}
                   items={[
                     { title: '前端上传' },
                     { title: '后端写盘' },

@@ -161,12 +161,7 @@ const AdminUsersPage = () => {
               disabled={isSelf}
               onConfirm={() => handleDelete(record)}
             >
-              <Button
-                danger
-                size="small"
-                disabled={isSelf}
-                loading={pendingId === record.id}
-              >
+              <Button danger size="small" disabled={isSelf} loading={pendingId === record.id}>
                 删除
               </Button>
             </Popconfirm>

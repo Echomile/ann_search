@@ -81,14 +81,10 @@ class IndexCache:
             if record is None:
                 raise LookupError(f"索引不存在: id={index_id}")
             if record.status != "ready" or not record.index_path:
-                raise RuntimeError(
-                    f"索引尚未就绪: id={index_id} status={record.status}"
-                )
+                raise RuntimeError(f"索引尚未就绪: id={index_id} status={record.status}")
             dataset = await db.get(Dataset, record.dataset_id)
             if dataset is None or not dataset.vector_dim:
-                raise RuntimeError(
-                    f"数据集元信息缺失: dataset_id={record.dataset_id}"
-                )
+                raise RuntimeError(f"数据集元信息缺失: dataset_id={record.dataset_id}")
 
             backend = create_backend(record.backend, dataset.vector_dim, record.metric)
             logger.info(

@@ -29,7 +29,9 @@ async def _get_dataset(db: DbSession, dataset_id: int) -> Dataset:
     """从数据库读取指定数据集，校验状态。"""
     dataset = await db.get(Dataset, dataset_id)
     if dataset is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {dataset_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {dataset_id}"
+        )
     if dataset.status not in {"ready", "preprocessing"}:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

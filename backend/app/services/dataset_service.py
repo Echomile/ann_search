@@ -193,9 +193,7 @@ async def create_dataset(
     return ds
 
 
-async def rename_dataset(
-    db: AsyncSession, *, dataset: Dataset, new_name: str
-) -> Dataset:
+async def rename_dataset(db: AsyncSession, *, dataset: Dataset, new_name: str) -> Dataset:
     """重命名数据集（A3 同名校验 + 异步提交 refresh）。
 
     Args:

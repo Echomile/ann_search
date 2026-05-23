@@ -121,6 +121,8 @@ class UploadProgressResponse(BaseModel):
 
     dataset_id: int = Field(..., description="数据集 ID")
     status: str = Field(..., description="状态：uploading | preprocessing | ready | failed")
-    bytes_received: int | None = Field(None, description="已写盘字节数；非 uploading 状态可能为 null")
+    bytes_received: int | None = Field(
+        None, description="已写盘字节数；非 uploading 状态可能为 null"
+    )
     total_bytes: int | None = Field(None, description="文件总字节数；streaming 上传时可能 null")
     percent: float | None = Field(None, description="进度百分比 0..100；total_bytes 缺失时为 null")

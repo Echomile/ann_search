@@ -185,6 +185,7 @@ def run_latency(
     Returns:
         dict[str, float]: ``p50_ms / p95_ms / p99_ms / mean_ms / qps``。
     """
+
     def task(q: np.ndarray) -> float:
         t0 = time.perf_counter()
         backend.search(q[None, :], top_k)
@@ -485,18 +486,12 @@ def render_markdown(results: dict[str, Any], output_path: Path) -> None:
 
     add("## 6. 后续工作")
     add("")
-    add(
-        "- **GPU 加速**：将 `faiss-cpu` 替换为 `faiss-gpu`，"
-        "对大批量查询可获得 5~20× 吞吐提升。"
-    )
+    add("- **GPU 加速**：将 `faiss-cpu` 替换为 `faiss-gpu`，对大批量查询可获得 5~20× 吞吐提升。")
     add(
         "- **更细的自适应策略**：基于历史 query 分布在线学习 `ef` 初值，"
         "或引入 PI 控制器跟踪目标 recall。"
     )
-    add(
-        "- **量化精度可调**：为 IVF-PQ 引入 OPQ 旋转 + 重排序 (re-ranking) "
-        "层挽回召回损失。"
-    )
+    add("- **量化精度可调**：为 IVF-PQ 引入 OPQ 旋转 + 重排序 (re-ranking) 层挽回召回损失。")
     add("- **持久化与冷启动**：评估索引文件大小与冷加载耗时，纳入综合指标。")
     add("")
 
@@ -649,9 +644,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dim", type=int, default=50, help="合成向量维度")
     parser.add_argument("--queries", type=int, default=1000, help="查询数量")
     parser.add_argument("--top-k", type=str, default="10,100", help="top_k 列表，逗号分隔")
-    parser.add_argument(
-        "--concurrency", type=str, default="1,4,8", help="并发度列表，逗号分隔"
-    )
+    parser.add_argument("--concurrency", type=str, default="1,4,8", help="并发度列表，逗号分隔")
     parser.add_argument(
         "--backends",
         type=str,
@@ -691,9 +684,7 @@ def main() -> int:
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    output_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"结果已写入 {output_path}", flush=True)
 
     report_path = Path(args.report)

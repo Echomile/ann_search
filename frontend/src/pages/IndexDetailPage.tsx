@@ -26,12 +26,7 @@ import { evaluationApi } from '@/api/evaluation';
 import type { IndexRecord } from '@/types/indexRecord';
 import type { BenchmarkResult, LatencyStats } from '@/types/evaluation';
 import { useDatasetStore } from '@/store/datasetStore';
-import {
-  formatDateTime,
-  formatMemoryMb,
-  formatSeconds,
-  indexStatusColor,
-} from '@/utils/format';
+import { formatDateTime, formatMemoryMb, formatSeconds, indexStatusColor } from '@/utils/format';
 import { extractError } from '@/utils/error';
 
 const { Title, Paragraph, Text } = Typography;
@@ -226,11 +221,7 @@ const IndexDetailPage = () => {
           >
             {currentIndex?.id === record.id ? '已选用' : '选用为当前索引'}
           </Button>
-          <Popconfirm
-            title={`删除索引 #${record.id}？`}
-            okType="danger"
-            onConfirm={handleDelete}
-          >
+          <Popconfirm title={`删除索引 #${record.id}？`} okType="danger" onConfirm={handleDelete}>
             <Button danger icon={<DeleteOutlined />}>
               删除
             </Button>
@@ -269,7 +260,9 @@ const IndexDetailPage = () => {
           </Descriptions.Item>
           <Descriptions.Item label="内存占用">{formatMemoryMb(record.memory_mb)}</Descriptions.Item>
           <Descriptions.Item label="所属数据集">#{record.dataset_id}</Descriptions.Item>
-          <Descriptions.Item label="创建时间">{formatDateTime(record.created_at)}</Descriptions.Item>
+          <Descriptions.Item label="创建时间">
+            {formatDateTime(record.created_at)}
+          </Descriptions.Item>
           <Descriptions.Item label="索引文件路径">
             {record.index_path ? (
               <Text code style={{ fontSize: 12 }}>
@@ -315,7 +308,11 @@ const IndexDetailPage = () => {
             />
           ) : (
             <>
-              <Descriptions column={{ xs: 1, sm: 2, md: 4 }} size="small" style={{ marginBottom: 16 }}>
+              <Descriptions
+                column={{ xs: 1, sm: 2, md: 4 }}
+                size="small"
+                style={{ marginBottom: 16 }}
+              >
                 {Object.entries(evalResult.recalls).map(([k, v]) => (
                   <Descriptions.Item key={k} label={`Recall@${k}`}>
                     <Text strong>{(v * 100).toFixed(2)}%</Text>

@@ -58,9 +58,7 @@ def load_dataset_artifacts(dataset_dir: str) -> dict[str, Any]:
         cell_ids: list[str] = [str(c) for c in json.load(fp)]
 
     if len(cell_ids) != vectors.shape[0]:
-        raise ValueError(
-            f"cell_ids 数量 {len(cell_ids)} 与向量行数 {vectors.shape[0]} 不一致"
-        )
+        raise ValueError(f"cell_ids 数量 {len(cell_ids)} 与向量行数 {vectors.shape[0]} 不一致")
 
     metadata = _load_metadata(dataset_dir, expected_rows=len(cell_ids))
     cell_id_to_index = {cid: i for i, cid in enumerate(cell_ids)}

@@ -325,7 +325,12 @@ const SearchPage = () => {
           <Row gutter={16}>
             <Col xs={24} md={8}>
               <Form.Item label="数据集" name="dataset_id" rules={[{ required: true }]}>
-                <Select options={datasetOptions} placeholder="选择数据集" showSearch optionFilterProp="label" />
+                <Select
+                  options={datasetOptions}
+                  placeholder="选择数据集"
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
@@ -362,7 +367,12 @@ const SearchPage = () => {
           <Row gutter={16}>
             <Col xs={24} md={8}>
               <Form.Item label="数据集" name="dataset_id" rules={[{ required: true }]}>
-                <Select options={datasetOptions} placeholder="选择数据集" showSearch optionFilterProp="label" />
+                <Select
+                  options={datasetOptions}
+                  placeholder="选择数据集"
+                  showSearch
+                  optionFilterProp="label"
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={8}>
@@ -452,11 +462,7 @@ const SearchPage = () => {
       </Paragraph>
 
       <Card style={{ marginBottom: 24 }}>
-        <Tabs
-          activeKey={activeTab}
-          onChange={(k) => setActiveTab(k as TabKey)}
-          items={tabItems}
-        />
+        <Tabs activeKey={activeTab} onChange={(k) => setActiveTab(k as TabKey)} items={tabItems} />
       </Card>
 
       <Card title="检索结果">

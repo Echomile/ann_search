@@ -29,7 +29,8 @@ class ParsedQuery(BaseModel):
 
     cell_id: str | None = Field(None, description="若用户明确给出 cell_id，则优先按 ID 检索")
     filters: dict[str, Any] = Field(
-        default_factory=dict, description="metadata 过滤条件，如 ``cell_type``、``disease``、``tissue``"
+        default_factory=dict,
+        description="metadata 过滤条件，如 ``cell_type``、``disease``、``tissue``",
     )
     top_k: int = Field(10, ge=1, le=100, description="返回近邻数量")
     intent: str = Field("", description="检索意图描述，用于回答生成")

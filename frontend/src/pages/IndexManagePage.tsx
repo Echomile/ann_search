@@ -234,9 +234,7 @@ const IndexManagePage = () => {
       dataIndex: 'status',
       key: 'status',
       width: 110,
-      render: (status: IndexStatusName) => (
-        <Tag color={indexStatusColor(status)}>{status}</Tag>
-      ),
+      render: (status: IndexStatusName) => <Tag color={indexStatusColor(status)}>{status}</Tag>,
     },
     {
       title: '构建耗时',
@@ -301,7 +299,12 @@ const IndexManagePage = () => {
             okType="danger"
             onConfirm={() => handleDelete(record.id)}
           >
-            <Button danger size="small" icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()}>
+            <Button
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={(e) => e.stopPropagation()}
+            >
               删除
             </Button>
           </Popconfirm>
@@ -341,11 +344,7 @@ const IndexManagePage = () => {
       </Paragraph>
 
       <Card title="构建新索引" style={{ marginBottom: 24 }}>
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ backend: 'hnswlib', metric: 'l2' }}
-        >
+        <Form form={form} layout="vertical" initialValues={{ backend: 'hnswlib', metric: 'l2' }}>
           <Row gutter={16}>
             <Col xs={24} md={8}>
               <Form.Item label="后端" name="backend" rules={[{ required: true }]}>
@@ -382,7 +381,12 @@ const IndexManagePage = () => {
                     name={['params', def.key]}
                     rules={[{ required: true, message: '必填' }]}
                   >
-                    <InputNumber min={def.min} max={def.max} step={def.step ?? 1} style={{ width: '100%' }} />
+                    <InputNumber
+                      min={def.min}
+                      max={def.max}
+                      step={def.step ?? 1}
+                      style={{ width: '100%' }}
+                    />
                   </Form.Item>
                 </Col>
               ))}

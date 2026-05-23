@@ -123,9 +123,7 @@ async def create_user(db: AsyncSession, username: str, password: str) -> User:
     return user
 
 
-async def authenticate_user(
-    db: AsyncSession, username: str, password: str
-) -> User | None:
+async def authenticate_user(db: AsyncSession, username: str, password: str) -> User | None:
     """校验用户名 / 密码。
 
     Args:

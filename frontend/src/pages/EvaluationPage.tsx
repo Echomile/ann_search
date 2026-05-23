@@ -156,8 +156,7 @@ const EvaluationPage = () => {
     [datasets],
   );
   const indexOptions = useMemo(
-    () =>
-      indexes.map((i) => ({ label: `#${i.id} · ${i.backend} · ${i.metric}`, value: i.id })),
+    () => indexes.map((i) => ({ label: `#${i.id} · ${i.backend} · ${i.metric}`, value: i.id })),
     [indexes],
   );
 
@@ -312,7 +311,9 @@ const EvaluationPage = () => {
       title: '数据集',
       key: 'dataset',
       render: (_: unknown, record) =>
-        record.dataset_name ? `${record.dataset_name} (#${record.dataset_id})` : `#${record.dataset_id}`,
+        record.dataset_name
+          ? `${record.dataset_name} (#${record.dataset_id})`
+          : `#${record.dataset_id}`,
     },
     {
       title: '总查询数',
@@ -390,11 +391,7 @@ const EvaluationPage = () => {
               </Form.Item>
             </Col>
             <Col xs={24} md={4}>
-              <Form.Item
-                label="并发列表"
-                name="concurrency_list"
-                rules={[{ required: true }]}
-              >
+              <Form.Item label="并发列表" name="concurrency_list" rules={[{ required: true }]}>
                 <Select
                   mode="tags"
                   tokenSeparators={[',', ' ']}
@@ -460,18 +457,11 @@ const EvaluationPage = () => {
                 />
               </Col>
               <Col xs={12} md={6}>
-                <Statistic
-                  title="内存占用"
-                  value={formatMemoryMb(selectedResult.memory_mb)}
-                />
+                <Statistic title="内存占用" value={formatMemoryMb(selectedResult.memory_mb)} />
               </Col>
               {Object.entries(selectedResult.recalls).map(([k, v]) => (
                 <Col xs={12} md={6} key={k}>
-                  <Statistic
-                    title={`Recall@${k}`}
-                    value={(v * 100).toFixed(2)}
-                    suffix="%"
-                  />
+                  <Statistic title={`Recall@${k}`} value={(v * 100).toFixed(2)} suffix="%" />
                 </Col>
               ))}
             </Row>

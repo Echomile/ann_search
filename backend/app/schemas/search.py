@@ -13,7 +13,9 @@ class SearchByCellId(BaseModel):
     dataset_id: int = Field(..., description="数据集 ID")
     cell_id: str = Field(..., description="细胞编号（obs index）")
     top_k: int = Field(10, ge=1, le=1000, description="返回近邻数量")
-    filters: dict[str, Any] | None = Field(None, description="元数据过滤，例如 {'cell_type': 'T cell'}")
+    filters: dict[str, Any] | None = Field(
+        None, description="元数据过滤，例如 {'cell_type': 'T cell'}"
+    )
     index_id: int | None = Field(None, description="指定使用的索引 ID，缺省则使用最新 ready 索引")
 
 
@@ -46,9 +48,7 @@ class MultiDatasetSearchRequest(BaseModel):
     source_dataset_id: int | None = Field(
         None, description="``cell_id`` 所属数据集 ID，缺省取 ``dataset_ids[0]``"
     )
-    vector: list[float] | None = Field(
-        None, description="自定义查询向量；与 ``cell_id`` 二选一"
-    )
+    vector: list[float] | None = Field(None, description="自定义查询向量；与 ``cell_id`` 二选一")
     top_k: int = Field(10, ge=1, le=1000, description="每个数据集返回近邻数")
     filters: dict[str, Any] | None = Field(None, description="元数据过滤条件")
 
