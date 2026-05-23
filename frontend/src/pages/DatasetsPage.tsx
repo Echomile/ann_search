@@ -8,6 +8,7 @@ import {
   Input,
   Popconfirm,
   Progress,
+  Skeleton,
   Space,
   Steps,
   Table,
@@ -545,15 +546,23 @@ const DatasetsPage = () => {
           </Space>
         }
       >
-        {datasets.length === 0 && !loading ? (
+        {loading && datasets.length === 0 ? (
+          <Skeleton active paragraph={{ rows: 5 }} />
+        ) : datasets.length === 0 ? (
           <Empty description="暂无数据集，请先上传 .h5ad" />
         ) : (
           <Table<Dataset>
             rowKey="id"
-            loading={loading}
             columns={columns}
             dataSource={datasets}
             pagination={{ pageSize: 10 }}
+            locale={{
+              emptyText: loading ? (
+                <Skeleton active paragraph={{ rows: 5 }} />
+              ) : (
+                <Empty description="暂无数据集，请先上传 .h5ad" />
+              ),
+            }}
             onRow={(record) => ({
               onClick: () => setCurrentDataset(record),
               style: { cursor: 'pointer' },

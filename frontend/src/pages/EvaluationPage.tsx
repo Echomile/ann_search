@@ -9,6 +9,7 @@ import {
   InputNumber,
   Row,
   Select,
+  Skeleton,
   Space,
   Statistic,
   Table,
@@ -423,7 +424,9 @@ const EvaluationPage = () => {
       </Card>
 
       <Card title="历史评测结果" style={{ marginBottom: 24 }}>
-        {history.length === 0 ? (
+        {refreshing && history.length === 0 ? (
+          <Skeleton active paragraph={{ rows: 5 }} />
+        ) : history.length === 0 ? (
           <Empty description="尚无历史评测" />
         ) : (
           <Table<BenchmarkSummary>
@@ -431,7 +434,13 @@ const EvaluationPage = () => {
             columns={summaryColumns}
             dataSource={history}
             pagination={{ pageSize: 8 }}
-            loading={refreshing}
+            locale={{
+              emptyText: refreshing ? (
+                <Skeleton active paragraph={{ rows: 5 }} />
+              ) : (
+                <Empty description="尚无历史评测" />
+              ),
+            }}
             rowClassName={(record) =>
               selectedResult?.index_id === record.index_id ? 'ant-table-row-selected' : ''
             }

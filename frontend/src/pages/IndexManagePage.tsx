@@ -10,6 +10,7 @@ import {
   Popconfirm,
   Row,
   Select,
+  Skeleton,
   Space,
   Table,
   Tag,
@@ -412,15 +413,23 @@ const IndexManagePage = () => {
           </Button>
         }
       >
-        {indexes.length === 0 && !loading ? (
+        {loading && indexes.length === 0 ? (
+          <Skeleton active paragraph={{ rows: 5 }} />
+        ) : indexes.length === 0 ? (
           <Empty description="暂无索引，请在上方表单构建" />
         ) : (
           <Table<IndexRecord>
             rowKey="id"
-            loading={loading}
             columns={columns}
             dataSource={indexes}
             pagination={{ pageSize: 10 }}
+            locale={{
+              emptyText: loading ? (
+                <Skeleton active paragraph={{ rows: 5 }} />
+              ) : (
+                <Empty description="暂无索引，请在上方表单构建" />
+              ),
+            }}
             onRow={(record) => ({
               onClick: () => navigate(`/indexes/${record.id}`),
               style: { cursor: 'pointer' },
