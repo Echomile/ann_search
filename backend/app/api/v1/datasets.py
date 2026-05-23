@@ -24,6 +24,7 @@ from app.schemas.dataset import (
     DatasetDeleteResponse,
     DatasetOut,
     DatasetStatus,
+    DatasetUpdate,
     DatasetUploadResponse,
     OrphanCleanupResponse,
     UmapResponse,
@@ -224,6 +225,52 @@ async def get_dataset(
     """
     ds = await dataset_service.get_dataset(db, dataset_id)
     ds = _ensure_owner(ds, current_user.id)
+    return DatasetOut.model_validate(ds)
+
+
+@router.patch(
+    "/{dataset_id}",
+    response_model=DatasetOut,
+    summary="重命名数据集",
+    description=(
+        "局部更新数据集字段，目前仅支持 ``name``。"
+        "重名（同用户名下已存在）返回 ``409``，非拥有者返回 ``403``，不存在返回 ``404``；"
+        "传入 ``name`` 与现值相同时直接返回原数据集。"
+    ),
+)
+async def update_dataset(
+    dataset_id: int,
+    payload: DatasetUpdate,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> DatasetOut:
+    """重命名数据集。
+
+    Args:
+        dataset_id: 目标数据集 ID。
+        payload: PATCH 字段（仅 ``name``）。
+        current_user: 当前登录用户。
+        db: 异步数据库会话。
+
+    Returns:
+        DatasetOut: 更新后的数据集。
+
+    Raises:
+        HTTPException: 404 不存在 / 403 非拥有者 / 409 同名占用 / 400 无字段更新。
+    """
+    ds = await dataset_service.get_dataset(db, dataset_id)
+    ds = _ensure_owner(ds, current_user.id)
+    if payload.name is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="请至少提供一个可更新字段"
+        )
+    try:
+        ds = await dataset_service.rename_dataset(db, dataset=ds, new_name=payload.name)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="数据集名称已存在，请换个名字或先删除旧的",
+        ) from None
     return DatasetOut.model_validate(ds)
 
 

@@ -256,6 +256,73 @@ async def test_upload_duplicate_name_409(
     assert "已存在" in resp.json()["detail"]
 
 
+async def test_rename_dataset(
+    http_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PATCH /datasets/{id} 支持重命名 + 同名 409 + 跨用户 403。"""
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "PROCESSED_DIR", str(tmp_path / "processed"))
+    monkeypatch.setattr(settings, "INDEX_DIR", str(tmp_path / "indexes"))
+
+    async def fake_enqueue(dataset_id: int) -> str:
+        return ""
+
+    monkeypatch.setattr(datasets_module, "enqueue_preprocess", fake_enqueue)
+
+    adata = anndata.AnnData(X=np.random.rand(3, 3).astype(np.float32))
+    h5ad_path = tmp_path / "rn.h5ad"
+    adata.write_h5ad(str(h5ad_path))
+
+    headers = await _login(http_client, "rnuser", "rnpass00")
+
+    async def _upload(name: str) -> int:
+        with h5ad_path.open("rb") as f:
+            resp = await http_client.post(
+                "/api/v1/datasets/upload",
+                headers=headers,
+                files={"file": ("rn.h5ad", f, "application/octet-stream")},
+                data={"name": name},
+            )
+        assert resp.status_code == 201, resp.text
+        return int(resp.json()["dataset"]["id"])
+
+    ds_a = await _upload("alpha")
+    ds_b = await _upload("beta")
+
+    # 正常重命名
+    resp = await http_client.patch(
+        f"/api/v1/datasets/{ds_a}", headers=headers, json={"name": "alpha2"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["name"] == "alpha2"
+
+    # 同名 409
+    resp = await http_client.patch(
+        f"/api/v1/datasets/{ds_a}", headers=headers, json={"name": "beta"}
+    )
+    assert resp.status_code == 409
+    assert "已存在" in resp.json()["detail"]
+
+    # 同名（自身现名）应直接 200 + 不变
+    resp = await http_client.patch(
+        f"/api/v1/datasets/{ds_a}", headers=headers, json={"name": "alpha2"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "alpha2"
+
+    # 跨用户 403
+    headers_other = await _login(http_client, "rnother", "rnpass99")
+    resp = await http_client.patch(
+        f"/api/v1/datasets/{ds_b}", headers=headers_other, json={"name": "stolen"}
+    )
+    assert resp.status_code == 403
+
+
 async def test_cleanup_orphan(
     http_client: AsyncClient,
     tmp_path: Path,

@@ -23,6 +23,14 @@ class DatasetCreate(DatasetBase):
     """创建数据集请求体。"""
 
 
+class DatasetUpdate(BaseModel):
+    """数据集字段更新请求体（PATCH 语义，全部字段可选）。"""
+
+    name: str | None = Field(
+        None, min_length=1, max_length=255, description="新的数据集名称（不修改请勿传）"
+    )
+
+
 class DatasetOut(DatasetBase):
     """数据集详情响应。"""
 

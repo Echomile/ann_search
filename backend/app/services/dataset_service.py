@@ -193,6 +193,32 @@ async def create_dataset(
     return ds
 
 
+async def rename_dataset(
+    db: AsyncSession, *, dataset: Dataset, new_name: str
+) -> Dataset:
+    """重命名数据集（A3 同名校验 + 异步提交 refresh）。
+
+    Args:
+        db: 异步数据库会话。
+        dataset: 目标数据集 ORM 对象（调用方已校验 owner）。
+        new_name: 新名称。
+
+    Returns:
+        Dataset: 重命名后的对象。
+
+    Raises:
+        ValueError: 当 ``new_name`` 已被同用户其他数据集占用。
+    """
+    if new_name == dataset.name:
+        return dataset
+    if await name_exists(db, owner_id=dataset.owner_id, name=new_name):
+        raise ValueError("name_taken")
+    dataset.name = new_name
+    await db.commit()
+    await db.refresh(dataset)
+    return dataset
+
+
 async def list_user_datasets(db: AsyncSession, owner_id: int) -> list[Dataset]:
     """列出指定用户的数据集，按 ``created_at`` 倒序。
 
