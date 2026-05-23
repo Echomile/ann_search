@@ -95,3 +95,24 @@ class OrphanCleanupResponse(BaseModel):
 
     deleted_ids: list[int] = Field(default_factory=list, description="被清理的数据集 ID 列表")
     count: int = Field(..., description="被清理的数据集数量")
+
+
+class UploadProgressResponse(BaseModel):
+    """数据集上传 / 写盘进度响应。
+
+    供前端在 ``axios.onUploadProgress`` 完成后轮询使用，区分浏览器侧"字节进入网络"
+    与后端 8 MB 分块写盘的真实进度，并能继续衔接到 Scanpy 预处理阶段。
+
+    Attributes:
+        dataset_id: 数据集 ID。
+        status: 数据集当前状态：``uploading | preprocessing | ready | failed``。
+        bytes_received: 已写盘字节数；非 ``uploading`` 状态可能为 ``None``。
+        total_bytes: 上传文件总字节数；``starlette`` 流式上传时可能为 ``None``。
+        percent: 进度百分比 ``0..100``；``total_bytes`` 缺失时为 ``None``，前端按 indeterminate 处理。
+    """
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    status: str = Field(..., description="状态：uploading | preprocessing | ready | failed")
+    bytes_received: int | None = Field(None, description="已写盘字节数；非 uploading 状态可能为 null")
+    total_bytes: int | None = Field(None, description="文件总字节数；streaming 上传时可能 null")
+    percent: float | None = Field(None, description="进度百分比 0..100；total_bytes 缺失时为 null")

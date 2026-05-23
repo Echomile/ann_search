@@ -41,3 +41,12 @@ export interface UmapResponse {
   sampled: boolean;
   total_cells: number;
 }
+
+// 后端写盘进度（与 schemas/dataset.py::UploadProgressResponse 对齐）
+export interface UploadProgressResponse {
+  dataset_id: number;
+  status: DatasetStatusName;
+  bytes_received: number | null;
+  total_bytes: number | null;
+  percent: number | null;
+}

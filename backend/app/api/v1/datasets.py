@@ -9,6 +9,7 @@
     - ``GET    /datasets/{id}``: 数据集详情；
     - ``DELETE /datasets/{id}``: 删除数据集（含磁盘文件与索引目录）；
     - ``GET    /datasets/{id}/status``: 查询数据集预处理状态摘要；
+    - ``GET    /datasets/{id}/upload-progress``: 查询数据集上传 / 写盘进度（供前端轮询）；
     - ``GET    /datasets/{id}/umap``: 获取数据集 UMAP 2D 坐标用于可视化。
 """
 
@@ -26,6 +27,7 @@ from app.schemas.dataset import (
     DatasetUploadResponse,
     OrphanCleanupResponse,
     UmapResponse,
+    UploadProgressResponse,
 )
 from app.services import dataset_service
 from app.tasks.preprocess_task import enqueue_preprocess
@@ -61,9 +63,11 @@ def _ensure_owner(ds: Dataset | None, user_id: int) -> Dataset:
     summary="上传数据集",
     description=(
         "通过 ``multipart/form-data`` 上传 ``.h5ad`` 文件。"
-        "服务端以 8 MB 分块流式写入磁盘，避免 GB 级文件 OOM；"
-        "落盘成功后创建 ``status=uploading`` 的数据集记录，并立即把"
-        " ``preprocess_dataset`` 任务入队 ARQ（Redis 不可用时 ``task_id`` 为空串）。"
+        "落盘流程：先创建 ``status=uploading`` 的数据集记录获取 ID，"
+        "然后以 8 MB 分块流式写盘（每块写完后把已写字节数登记到进程内进度字典，"
+        "供 ``GET /datasets/{id}/upload-progress`` 实时读取），"
+        "最后把 ``preprocess_dataset`` 任务入队 ARQ（Redis 不可用时 ``task_id`` 为空串）。"
+        "写盘失败或文件为空会回滚 DB 行与磁盘文件，并清理进度记录。"
     ),
 )
 async def upload_dataset(
@@ -92,10 +96,34 @@ async def upload_dataset(
     raw_dir = dataset_service.build_raw_path(current_user.id)
     target = raw_dir / dataset_service.gen_h5ad_filename()
 
-    try:
-        written = await dataset_service.stream_to_disk(file, target)
-    except Exception as exc:
+    ds = await dataset_service.create_dataset(
+        db,
+        owner_id=current_user.id,
+        name=name,
+        h5ad_path=str(target),
+    )
+    total_bytes = file.size
+
+    dataset_service.set_upload_progress(ds.id, 0, total_bytes)
+
+    async def _rollback_dataset() -> None:
+        """写盘失败时回滚：删半成品文件 + 删 DB 行 + 清进度。"""
         target.unlink(missing_ok=True)
+        dataset_service.clear_upload_progress(ds.id)
+        try:
+            await db.delete(ds)
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("回滚上传失败的数据集行失败 dataset_id=%s err=%s", ds.id, exc)
+
+    try:
+        written = await dataset_service.stream_to_disk(
+            file,
+            target,
+            on_chunk=lambda n: dataset_service.set_upload_progress(ds.id, n, total_bytes),
+        )
+    except Exception as exc:
+        await _rollback_dataset()
         logger.exception("写入上传文件失败 user_id=%s err=%s", current_user.id, exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -105,18 +133,13 @@ async def upload_dataset(
         await file.close()
 
     if written == 0:
-        target.unlink(missing_ok=True)
+        await _rollback_dataset()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="上传文件为空",
         )
 
-    ds = await dataset_service.create_dataset(
-        db,
-        owner_id=current_user.id,
-        name=name,
-        h5ad_path=str(target),
-    )
+    dataset_service.clear_upload_progress(ds.id)
 
     try:
         task_id = await enqueue_preprocess(ds.id)
@@ -268,6 +291,57 @@ async def get_dataset_status(
         vector_dim=ds.vector_dim,
         vector_source=ds.vector_source,
         meta_columns=ds.meta_columns,  # type: ignore[arg-type]
+    )
+
+
+@router.get(
+    "/{dataset_id}/upload-progress",
+    response_model=UploadProgressResponse,
+    summary="数据集上传 / 写盘进度",
+    description=(
+        "返回数据集的后端写盘进度，供前端在 ``axios.onUploadProgress`` 完成后轮询使用。"
+        "``status=uploading`` 时返回 ``bytes_received`` / ``total_bytes`` / ``percent``，"
+        "区别于浏览器侧的字节传输进度；进入 ``preprocessing`` 后这三项可能为 ``null``，"
+        "前端可按 indeterminate 切到 Scanpy 预处理文案。"
+        "不存在返回 ``404``，非拥有者返回 ``403``。"
+    ),
+)
+async def get_dataset_upload_progress(
+    dataset_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UploadProgressResponse:
+    """获取数据集上传 / 写盘进度。
+
+    Args:
+        dataset_id: 数据集 ID。
+        current_user: 当前登录用户。
+        db: 异步数据库会话。
+
+    Returns:
+        UploadProgressResponse: 含状态、已写盘字节数与百分比的进度对象。
+    """
+    ds = await dataset_service.get_dataset(db, dataset_id)
+    ds = _ensure_owner(ds, current_user.id)
+
+    record = dataset_service.get_upload_progress(dataset_id)
+    bytes_received: int | None = None
+    total_bytes: int | None = None
+    percent: float | None = None
+    if record is not None:
+        raw_received = record.get("bytes_received")
+        raw_total = record.get("total_bytes")
+        bytes_received = int(raw_received) if raw_received is not None else None
+        total_bytes = int(raw_total) if raw_total is not None else None
+        if bytes_received is not None and total_bytes:
+            percent = round(bytes_received / total_bytes * 100, 2)
+
+    return UploadProgressResponse(
+        dataset_id=dataset_id,
+        status=ds.status,
+        bytes_received=bytes_received,
+        total_bytes=total_bytes,
+        percent=percent,
     )
 
 

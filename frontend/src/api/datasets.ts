@@ -6,6 +6,7 @@ import type {
   DatasetStatus,
   DatasetUploadResponse,
   UmapResponse,
+  UploadProgressResponse,
 } from '@/types/dataset';
 
 interface UploadOptions {
@@ -54,6 +55,13 @@ export const datasetsApi = {
 
   status: async (id: number): Promise<DatasetStatus> => {
     const { data } = await httpClient.get<DatasetStatus>(`/datasets/${id}/status`);
+    return data;
+  },
+
+  uploadProgress: async (id: number): Promise<UploadProgressResponse> => {
+    const { data } = await httpClient.get<UploadProgressResponse>(
+      `/datasets/${id}/upload-progress`,
+    );
     return data;
   },
 

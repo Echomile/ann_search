@@ -322,3 +322,13 @@ async def test_cleanup_orphan(
     assert resp.json() == {"deleted_ids": [], "count": 0}
 
     _ = owner_id
+
+
+async def test_upload_progress_not_found(http_client: AsyncClient) -> None:
+    """访问不存在数据集的 ``/upload-progress`` 应返回 ``404``。"""
+    headers = await _login(http_client, "puser", "ppass1234")
+    resp = await http_client.get(
+        "/api/v1/datasets/999/upload-progress",
+        headers=headers,
+    )
+    assert resp.status_code == 404

@@ -9,6 +9,7 @@ import {
   Popconfirm,
   Progress,
   Space,
+  Steps,
   Table,
   Tag,
   Typography,
@@ -23,9 +24,14 @@ import {
   InboxOutlined,
   ReloadOutlined,
   CheckCircleTwoTone,
+  LoadingOutlined,
 } from '@ant-design/icons';
 import { datasetsApi } from '@/api/datasets';
-import type { Dataset, DatasetStatusName } from '@/types/dataset';
+import type {
+  Dataset,
+  DatasetStatusName,
+  UploadProgressResponse,
+} from '@/types/dataset';
 import { useDatasetStore } from '@/store/datasetStore';
 import { datasetStatusColor, formatDateTime } from '@/utils/format';
 import { extractError } from '@/utils/error';
@@ -35,22 +41,125 @@ const { Title, Paragraph, Text } = Typography;
 const { Dragger } = Upload;
 
 const POLL_INTERVAL_MS = 5000;
+const POLL_UPLOAD_PROGRESS_MS = 500;
 const FINAL_STATUSES: DatasetStatusName[] = ['ready', 'failed'];
+
+// 上传流水线阶段：transfer=axios 字节传输；writing=后端写盘；preprocessing=Scanpy；done=终态
+type UploadPhase = 'idle' | 'transfer' | 'writing' | 'preprocessing' | 'done';
+
+const PHASE_TO_STEP_INDEX: Record<UploadPhase, number> = {
+  idle: 0,
+  transfer: 0,
+  writing: 1,
+  preprocessing: 2,
+  done: 3,
+};
 
 interface UploadFormValues {
   name: string;
 }
+
+/**
+ * 渲染"开始上传"按钮文案，根据当前阶段动态切换。
+ *
+ * 在 `transfer` 阶段显示 axios 字节传输百分比；
+ * 在 `writing` 阶段显示后端写盘百分比（``total_bytes`` 缺失时退化为"写盘中"）；
+ * 在 `preprocessing` 阶段显示固定文案；其他阶段回落到"开始上传"。
+ */
+const renderSubmitLabel = (
+  uploading: boolean,
+  phase: UploadPhase,
+  percent: number,
+  backend: UploadProgressResponse | null,
+): string => {
+  if (!uploading) return '开始上传';
+  if (phase === 'transfer') return `前端上传中 ${percent}%`;
+  if (phase === 'writing') {
+    if (backend?.percent != null) return `后端写盘中 ${backend.percent.toFixed(1)}%`;
+    return '后端写盘中…';
+  }
+  if (phase === 'preprocessing') return 'Scanpy 预处理中…';
+  return '处理中…';
+};
+
+/**
+ * 渲染后端进度条的 ``label`` 文案。
+ */
+const renderBackendLabel = (
+  phase: UploadPhase,
+  backend: UploadProgressResponse | null,
+): string => {
+  if (phase === 'preprocessing') return 'Scanpy 预处理中（PCA / UMAP）';
+  if (phase === 'done') return '后端处理完成';
+  if (backend?.total_bytes != null) return '后端写盘进度（bytes_received / total_bytes）';
+  return '后端写盘中（streaming，进度不可知）';
+};
+
+/**
+ * 根据阶段渲染对应的后端进度条 / spinner。
+ *
+ * - ``writing`` + ``total_bytes`` 已知：百分比进度条；
+ * - ``writing`` + ``total_bytes=null``：indeterminate active 进度条；
+ * - ``preprocessing``：indeterminate active + Loading 图标；
+ * - ``done``：100% 成功 / 异常状态。
+ */
+const renderBackendProgress = (
+  phase: UploadPhase,
+  backend: UploadProgressResponse | null,
+  hasError: boolean,
+): JSX.Element => {
+  if (phase === 'done') {
+    return (
+      <Progress
+        percent={100}
+        status={hasError ? 'exception' : 'success'}
+      />
+    );
+  }
+  if (phase === 'preprocessing') {
+    return (
+      <Space>
+        <LoadingOutlined spin />
+        <Progress percent={100} status="active" showInfo={false} style={{ width: 320 }} />
+        <Text type="secondary">不可知耗时，请耐心等待</Text>
+      </Space>
+    );
+  }
+  // writing
+  if (backend?.total_bytes != null && backend.percent != null) {
+    return <Progress percent={backend.percent} status="active" />;
+  }
+  return (
+    <Space>
+      <LoadingOutlined spin />
+      <Progress percent={100} status="active" showInfo={false} style={{ width: 320 }} />
+      <Text type="secondary">streaming 上传，未知总大小</Text>
+    </Space>
+  );
+};
 
 const DatasetsPage = () => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>('idle');
+  const [backendProgress, setBackendProgress] = useState<UploadProgressResponse | null>(null);
+  const [uploadHasError, setUploadHasError] = useState(false);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [form] = Form.useForm<UploadFormValues>();
   const currentDataset = useDatasetStore((s) => s.currentDataset);
   const setCurrentDataset = useDatasetStore((s) => s.setCurrentDataset);
   const lastUploadRef = useRef<string | null>(null);
+  // 轮询取消标记：组件卸载或下次上传开始时置 true，避免脏 setState
+  const pollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
+
+  useEffect(() => {
+    const token = pollAbortRef.current;
+    return () => {
+      token.cancelled = true;
+    };
+  }, []);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -160,6 +269,46 @@ const DatasetsPage = () => {
     }
   };
 
+  /**
+   * 上传完成后轮询后端 ``/upload-progress``，直到 ready / failed。
+   *
+   * Args:
+   *   datasetId: 后端返回的数据集 ID。
+   *   token: 取消标记，用于组件卸载或新一轮上传开始时打断轮询。
+   *
+   * Returns:
+   *   Promise 解析为最终阶段 (status=ready | failed) 的进度对象。
+   */
+  const pollUploadProgress = useCallback(
+    (datasetId: number, token: { cancelled: boolean }): Promise<UploadProgressResponse> =>
+      new Promise((resolve, reject) => {
+        const tick = async () => {
+          if (token.cancelled) {
+            reject(new Error('已取消'));
+            return;
+          }
+          try {
+            const p = await datasetsApi.uploadProgress(datasetId);
+            setBackendProgress(p);
+            if (p.status === 'uploading') {
+              setUploadPhase('writing');
+            } else if (p.status === 'preprocessing') {
+              setUploadPhase('preprocessing');
+            }
+            if (p.status === 'ready' || p.status === 'failed') {
+              resolve(p);
+              return;
+            }
+            window.setTimeout(tick, POLL_UPLOAD_PROGRESS_MS);
+          } catch (e) {
+            reject(e);
+          }
+        };
+        void tick();
+      }),
+    [],
+  );
+
   const handleSubmit = async () => {
     if (fileList.length === 0) {
       message.warning('请选择 .h5ad 文件');
@@ -176,8 +325,15 @@ const DatasetsPage = () => {
     } catch {
       return;
     }
+
     setUploading(true);
     setUploadPercent(0);
+    setBackendProgress(null);
+    setUploadHasError(false);
+    setUploadPhase('transfer');
+    pollAbortRef.current = { cancelled: false };
+    const abortToken = pollAbortRef.current;
+
     try {
       const resp = await datasetsApi.upload(values.name, raw, {
         onUploadProgress: (event) => {
@@ -186,13 +342,27 @@ const DatasetsPage = () => {
           }
         },
       });
-      lastUploadRef.current = resp.dataset.name;
-      message.success('上传成功，已入队预处理');
-      form.resetFields();
-      setFileList([]);
-      setUploadPercent(0);
+      // axios 完成 → POST 响应已返回，进入后端处理阶段
+      setUploadPercent(100);
+      setUploadPhase('writing');
+
+      const final = await pollUploadProgress(resp.dataset.id, abortToken);
+
+      if (final.status === 'failed') {
+        setUploadHasError(true);
+        setUploadPhase('done');
+        message.error(`数据集「${resp.dataset.name}」预处理失败`);
+      } else {
+        setUploadPhase('done');
+        lastUploadRef.current = resp.dataset.name;
+        message.success('上传 + 预处理完成');
+        form.resetFields();
+        setFileList([]);
+      }
       await fetchAll();
     } catch (err) {
+      setUploadHasError(true);
+      setUploadPhase('done');
       message.error(extractError(err));
     } finally {
       setUploading(false);
@@ -315,22 +485,57 @@ const DatasetsPage = () => {
               <p className="ant-upload-hint">单文件上传，最大支持后端配置的体积上限</p>
             </Dragger>
           </Form.Item>
-          {uploading && (
-            <Form.Item>
-              <Progress percent={uploadPercent} status="active" />
-            </Form.Item>
+          {(uploading || uploadPhase === 'done') && (
+            <>
+              <Form.Item>
+                <Steps
+                  size="small"
+                  current={PHASE_TO_STEP_INDEX[uploadPhase]}
+                  status={
+                    uploadHasError
+                      ? 'error'
+                      : uploadPhase === 'done'
+                        ? 'finish'
+                        : 'process'
+                  }
+                  items={[
+                    { title: '前端上传' },
+                    { title: '后端写盘' },
+                    { title: 'Scanpy 预处理' },
+                    { title: '完成' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item label="前端 → 后端字节传输">
+                <Progress
+                  percent={uploadPercent}
+                  status={
+                    uploadHasError && uploadPhase === 'transfer'
+                      ? 'exception'
+                      : uploadPhase === 'transfer'
+                        ? 'active'
+                        : 'success'
+                  }
+                />
+              </Form.Item>
+              {uploadPhase !== 'transfer' && (
+                <Form.Item label={renderBackendLabel(uploadPhase, backendProgress)}>
+                  {renderBackendProgress(uploadPhase, backendProgress, uploadHasError)}
+                </Form.Item>
+              )}
+            </>
           )}
-          {lastUploadRef.current && !uploading && (
+          {lastUploadRef.current && !uploading && uploadPhase === 'idle' && (
             <Alert
               type="success"
               showIcon
               style={{ marginBottom: 16 }}
-              message={`「${lastUploadRef.current}」已入队预处理，列表将在状态变化时自动刷新。`}
+              message={`「${lastUploadRef.current}」已上传并完成预处理。`}
             />
           )}
           <Space>
             <Button type="primary" loading={uploading} onClick={handleSubmit}>
-              {uploading ? `上传中 ${uploadPercent}%` : '开始上传'}
+              {renderSubmitLabel(uploading, uploadPhase, uploadPercent, backendProgress)}
             </Button>
             <Button onClick={() => fetchAll()} disabled={loading}>
               刷新列表

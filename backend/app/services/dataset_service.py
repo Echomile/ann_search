@@ -14,7 +14,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import BinaryIO
 
@@ -31,6 +33,59 @@ logger = get_logger(__name__)
 CHUNK_SIZE = 8 * 1024 * 1024
 UMAP_MAX_SAMPLE = 50_000
 UMAP_SAMPLE_SEED = 42
+
+_UPLOAD_PROGRESS: dict[int, dict[str, int | None]] = {}
+_UPLOAD_PROGRESS_LOCK = threading.Lock()
+
+
+def set_upload_progress(
+    dataset_id: int,
+    bytes_received: int,
+    total_bytes: int | None,
+) -> None:
+    """记录指定数据集的写盘进度（线程安全）。
+
+    用于 ``GET /datasets/{id}/upload-progress`` 暴露后端 8 MB 分块写盘的真实进度，
+    区别于浏览器侧 ``axios.onUploadProgress`` 看到的"字节进入网络"进度。
+    记录仅保存在进程内存，多 worker 部署时需切换 Redis；当前业务量进程内字典足够。
+
+    Args:
+        dataset_id: 数据集 ID。
+        bytes_received: 截至目前已写入磁盘的字节数。
+        total_bytes: 上传文件总字节数；``starlette`` 流式上传可能为 ``None``。
+    """
+    with _UPLOAD_PROGRESS_LOCK:
+        _UPLOAD_PROGRESS[dataset_id] = {
+            "bytes_received": bytes_received,
+            "total_bytes": total_bytes,
+        }
+
+
+def get_upload_progress(dataset_id: int) -> dict[str, int | None] | None:
+    """读取指定数据集的写盘进度。
+
+    Args:
+        dataset_id: 数据集 ID。
+
+    Returns:
+        dict | None: ``{"bytes_received": int, "total_bytes": int | None}``；
+        若该数据集不在上传中（已完成 / 失败 / 从未上传）返回 ``None``。
+    """
+    with _UPLOAD_PROGRESS_LOCK:
+        record = _UPLOAD_PROGRESS.get(dataset_id)
+        return dict(record) if record else None
+
+
+def clear_upload_progress(dataset_id: int) -> None:
+    """清理指定数据集的写盘进度记录。
+
+    上传完成或失败时调用，避免内存泄漏。
+
+    Args:
+        dataset_id: 数据集 ID。
+    """
+    with _UPLOAD_PROGRESS_LOCK:
+        _UPLOAD_PROGRESS.pop(dataset_id, None)
 
 
 def build_raw_path(user_id: int) -> Path:
@@ -56,7 +111,12 @@ def gen_h5ad_filename() -> str:
     return f"{uuid.uuid4().hex}.h5ad"
 
 
-async def stream_to_disk(reader: BinaryIO | object, dest: Path) -> int:
+async def stream_to_disk(
+    reader: BinaryIO | object,
+    dest: Path,
+    *,
+    on_chunk: Callable[[int], None] | None = None,
+) -> int:
     """把上传的二进制流分块写入磁盘，返回写入字节数。
 
     ``reader`` 需支持异步 ``read(size)``（FastAPI ``UploadFile`` 即如此），
@@ -65,6 +125,8 @@ async def stream_to_disk(reader: BinaryIO | object, dest: Path) -> int:
     Args:
         reader: 提供 ``async read(size)`` 的对象。
         dest: 目标文件路径。
+        on_chunk: 可选回调，每写完一个 chunk 后以已写字节数为参数调用一次，
+            供上层把真实写盘进度上报到 :func:`set_upload_progress`。
 
     Returns:
         int: 实际写入的字节数。
@@ -80,6 +142,8 @@ async def stream_to_disk(reader: BinaryIO | object, dest: Path) -> int:
                 break
             out.write(chunk)
             total += len(chunk)
+            if on_chunk is not None:
+                on_chunk(total)
     return total
 
 
