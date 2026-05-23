@@ -104,6 +104,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 注意 Starlette 中间件栈语义：后 add_middleware 的处于最外层（请求先进、响应后出）。
+# 因此先 add 压缩、后 add CORS，使 CORS 在最外层处理预检与跨域头，压缩在内层对响应体做编码。
+try:
+    from brotli_asgi import BrotliMiddleware  # noqa: PLC0415
+
+    app.add_middleware(BrotliMiddleware, quality=4, minimum_size=512)
+except ImportError:
+    from fastapi.middleware.gzip import GZipMiddleware  # noqa: PLC0415
+
+    app.add_middleware(GZipMiddleware, minimum_size=512, compresslevel=6)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
