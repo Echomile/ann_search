@@ -3,11 +3,13 @@
 所有接口都要求登录（``Depends(get_current_user)``），并仅允许操作自己拥有的数据集。
 
 接口列表：
-    - ``POST   /datasets/upload``: 流式上传 .h5ad 并入队预处理任务；
+    - ``POST   /datasets/upload``: 流式上传 .h5ad 并入队预处理任务（同名返回 409）；
     - ``GET    /datasets``: 列出当前用户拥有的数据集；
+    - ``DELETE /datasets/orphan``: 批量清理 ``status=failed`` 或向量文件缺失的孤儿数据集；
     - ``GET    /datasets/{id}``: 数据集详情；
     - ``DELETE /datasets/{id}``: 删除数据集（含磁盘文件与索引目录）；
-    - ``GET    /datasets/{id}/status``: 查询数据集预处理状态摘要。
+    - ``GET    /datasets/{id}/status``: 查询数据集预处理状态摘要；
+    - ``GET    /datasets/{id}/umap``: 获取数据集 UMAP 2D 坐标用于可视化。
 """
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from app.schemas.dataset import (
     DatasetOut,
     DatasetStatus,
     DatasetUploadResponse,
+    OrphanCleanupResponse,
+    UmapResponse,
 )
 from app.services import dataset_service
 from app.tasks.preprocess_task import enqueue_preprocess
@@ -79,6 +83,12 @@ async def upload_dataset(
     Returns:
         DatasetUploadResponse: 新建的数据集与预处理任务 ID。
     """
+    if await dataset_service.name_exists(db, owner_id=current_user.id, name=name):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="数据集名称已存在，请换个名字或先删除旧的",
+        )
+
     raw_dir = dataset_service.build_raw_path(current_user.id)
     target = raw_dir / dataset_service.gen_h5ad_filename()
 
@@ -138,6 +148,34 @@ async def list_datasets(current_user: CurrentUser, db: DbSession) -> list[Datase
     """
     rows = await dataset_service.list_user_datasets(db, current_user.id)
     return [DatasetOut.model_validate(ds) for ds in rows]
+
+
+@router.delete(
+    "/orphan",
+    response_model=OrphanCleanupResponse,
+    summary="清理失败数据集",
+    description=(
+        "批量删除当前用户名下所有 ``status='failed'`` 或缺失向量文件 "
+        "(``status='ready'`` 但 ``vectors_path`` 为空 / 文件不存在) 的孤儿数据集，"
+        "并清理对应的磁盘文件、``processed/{id}`` 与 ``indexes/{id}`` 目录。"
+        "返回被清理的数据集 ID 列表与数量；如无任何孤儿，``count=0``、``deleted_ids=[]``。"
+    ),
+)
+async def cleanup_orphan_datasets(
+    current_user: CurrentUser,
+    db: DbSession,
+) -> OrphanCleanupResponse:
+    """批量清理孤儿数据集。
+
+    Args:
+        current_user: 当前登录用户。
+        db: 异步数据库会话。
+
+    Returns:
+        OrphanCleanupResponse: 包含 ``deleted_ids`` 与 ``count`` 的响应。
+    """
+    deleted_ids = await dataset_service.cleanup_orphan_datasets(db, current_user.id)
+    return OrphanCleanupResponse(deleted_ids=deleted_ids, count=len(deleted_ids))
 
 
 @router.get(
@@ -230,4 +268,47 @@ async def get_dataset_status(
         vector_dim=ds.vector_dim,
         vector_source=ds.vector_source,
         meta_columns=ds.meta_columns,  # type: ignore[arg-type]
+    )
+
+
+@router.get(
+    "/{dataset_id}/umap",
+    response_model=UmapResponse,
+    summary="获取 UMAP 2D 坐标",
+    description=(
+        "返回数据集的 UMAP 2D 散点坐标，供前端 Plotly 可视化使用。"
+        "对超过 50 000 细胞的数据集，使用固定种子 ``RandomState(42)`` 等概率下采样到 50 000 个，"
+        "并通过 ``sampled=true`` 标记，避免大数据集把前端浏览器拖崩。"
+        "若数据集尚未生成 UMAP（``data/processed/{id}/umap_2d.npy`` 缺失），"
+        "返回 ``has_umap=false`` 与空坐标，HTTP 状态码仍为 ``200``，方便前端做兜底降级。"
+        "不存在返回 ``404``，非拥有者返回 ``403``。"
+    ),
+)
+async def get_dataset_umap(
+    dataset_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+) -> UmapResponse:
+    """获取数据集 UMAP 2D 坐标。
+
+    Args:
+        dataset_id: 数据集 ID。
+        current_user: 当前登录用户。
+        db: 异步数据库会话。
+
+    Returns:
+        UmapResponse: UMAP 坐标响应；文件缺失时 ``has_umap=False`` 且 ``coords=None``。
+    """
+    ds = await dataset_service.get_dataset(db, dataset_id)
+    ds = _ensure_owner(ds, current_user.id)
+
+    coords, cell_ids, sampled, total = dataset_service.load_umap_2d(dataset_id)
+    has_umap = coords is not None
+    return UmapResponse(
+        dataset_id=dataset_id,
+        has_umap=has_umap,
+        coords=coords,
+        cell_ids=cell_ids,
+        sampled=sampled,
+        total_cells=total if total > 0 else (ds.cell_count or 0),
     )

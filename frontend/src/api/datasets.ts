@@ -5,11 +5,18 @@ import type {
   DatasetDeleteResponse,
   DatasetStatus,
   DatasetUploadResponse,
+  UmapResponse,
 } from '@/types/dataset';
 
 interface UploadOptions {
   onUploadProgress?: (event: AxiosProgressEvent) => void;
   signal?: AbortSignal;
+}
+
+// 孤儿数据集清理响应（与后端 OrphanCleanupResponse 对齐）
+export interface OrphanCleanupResponse {
+  deleted_ids: number[];
+  count: number;
 }
 
 // 数据集管理 API
@@ -47,6 +54,16 @@ export const datasetsApi = {
 
   status: async (id: number): Promise<DatasetStatus> => {
     const { data } = await httpClient.get<DatasetStatus>(`/datasets/${id}/status`);
+    return data;
+  },
+
+  cleanupOrphan: async (): Promise<OrphanCleanupResponse> => {
+    const { data } = await httpClient.delete<OrphanCleanupResponse>('/datasets/orphan');
+    return data;
+  },
+
+  umap: async (id: number): Promise<UmapResponse> => {
+    const { data } = await httpClient.get<UmapResponse>(`/datasets/${id}/umap`);
     return data;
   },
 };

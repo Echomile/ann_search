@@ -210,3 +210,115 @@ async def test_get_dataset_forbidden_for_other_user(
     resp = await http_client.get("/api/v1/datasets", headers=headers_b)
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+async def test_upload_duplicate_name_409(
+    http_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同名再次上传应返回 409，且 detail 含明确提示文案。"""
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "PROCESSED_DIR", str(tmp_path / "processed"))
+    monkeypatch.setattr(settings, "INDEX_DIR", str(tmp_path / "indexes"))
+
+    async def fake_enqueue(dataset_id: int) -> str:
+        return ""
+
+    monkeypatch.setattr(datasets_module, "enqueue_preprocess", fake_enqueue)
+
+    adata = anndata.AnnData(X=np.random.rand(3, 3).astype(np.float32))
+    h5ad_path = tmp_path / "dup.h5ad"
+    adata.write_h5ad(str(h5ad_path))
+
+    headers = await _login(http_client, "dupuser", "duppass00")
+
+    with h5ad_path.open("rb") as f:
+        resp = await http_client.post(
+            "/api/v1/datasets/upload",
+            headers=headers,
+            files={"file": ("dup.h5ad", f, "application/octet-stream")},
+            data={"name": "dup_ds"},
+        )
+    assert resp.status_code == 201, resp.text
+
+    with h5ad_path.open("rb") as f:
+        resp = await http_client.post(
+            "/api/v1/datasets/upload",
+            headers=headers,
+            files={"file": ("dup.h5ad", f, "application/octet-stream")},
+            data={"name": "dup_ds"},
+        )
+    assert resp.status_code == 409, resp.text
+    assert "已存在" in resp.json()["detail"]
+
+
+async def test_cleanup_orphan(
+    http_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """构造一个 status=failed 的孤儿数据集，孤儿清理接口应将其删除。
+
+    步骤：
+        1. 上传一个数据集（status=uploading），后端 stub 不入队；
+        2. 直接通过 service 把状态改为 ``failed``；
+        3. 调用 ``DELETE /datasets/orphan``，断言 ``count=1`` 且包含其 ID；
+        4. ``GET /datasets`` 不再列出它。
+    """
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    from app.services import dataset_service
+
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "PROCESSED_DIR", str(tmp_path / "processed"))
+    monkeypatch.setattr(settings, "INDEX_DIR", str(tmp_path / "indexes"))
+
+    async def fake_enqueue(dataset_id: int) -> str:
+        return ""
+
+    monkeypatch.setattr(datasets_module, "enqueue_preprocess", fake_enqueue)
+
+    adata = anndata.AnnData(X=np.random.rand(3, 3).astype(np.float32))
+    h5ad_path = tmp_path / "orphan.h5ad"
+    adata.write_h5ad(str(h5ad_path))
+
+    headers = await _login(http_client, "orphanuser", "orphanpw0")
+
+    with h5ad_path.open("rb") as f:
+        resp = await http_client.post(
+            "/api/v1/datasets/upload",
+            headers=headers,
+            files={"file": ("orphan.h5ad", f, "application/octet-stream")},
+            data={"name": "orphan_ds"},
+        )
+    assert resp.status_code == 201, resp.text
+    dataset_id = resp.json()["dataset"]["id"]
+    owner_id = resp.json()["dataset"]["owner_id"]
+
+    async with _TestSessionLocal() as session:
+        ds = await dataset_service.get_dataset(session, dataset_id)
+        assert ds is not None
+        ds.status = "failed"
+        await session.commit()
+
+    resp = await http_client.delete("/api/v1/datasets/orphan", headers=headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["count"] == 1
+    assert dataset_id in body["deleted_ids"]
+
+    resp = await http_client.get("/api/v1/datasets", headers=headers)
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()]
+    assert dataset_id not in ids
+
+    resp = await http_client.delete("/api/v1/datasets/orphan", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted_ids": [], "count": 0}
+
+    _ = owner_id

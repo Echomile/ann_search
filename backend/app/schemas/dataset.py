@@ -63,3 +63,35 @@ class DatasetDeleteResponse(BaseModel):
 
     deleted: bool = Field(..., description="是否成功删除")
     dataset_id: int = Field(..., description="被删除的数据集 ID")
+
+
+class UmapResponse(BaseModel):
+    """数据集 UMAP 2D 坐标响应。"""
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    has_umap: bool = Field(..., description="是否存在已计算的 UMAP 2D 坐标")
+    coords: list[list[float]] | None = Field(
+        None,
+        description="形如 (N, 2) 的 UMAP 坐标数组，缺失时为 null",
+    )
+    cell_ids: list[str] | None = Field(
+        None,
+        description="与 coords 行索引一一对应的 cell_id 列表，缺失时为 null",
+    )
+    sampled: bool = Field(
+        ...,
+        description="是否触发下采样：原始 N > 50000 时随机下采样至 50000 防止前端崩溃",
+    )
+    total_cells: int = Field(..., description="该数据集的原始细胞总数（下采样前）")
+
+
+class OrphanCleanupResponse(BaseModel):
+    """孤儿数据集批量清理响应。
+
+    Attributes:
+        deleted_ids: 被清理的数据集 ID 列表，按清理顺序排列。
+        count: 被清理的数据集数量，等价于 ``len(deleted_ids)``。
+    """
+
+    deleted_ids: list[int] = Field(default_factory=list, description="被清理的数据集 ID 列表")
+    count: int = Field(..., description="被清理的数据集数量")

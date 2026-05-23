@@ -18,16 +18,17 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadFile, UploadProps } from 'antd/es/upload/interface';
 import {
+  ClearOutlined,
   DeleteOutlined,
   InboxOutlined,
   ReloadOutlined,
   CheckCircleTwoTone,
 } from '@ant-design/icons';
-import axios from 'axios';
 import { datasetsApi } from '@/api/datasets';
 import type { Dataset, DatasetStatusName } from '@/types/dataset';
 import { useDatasetStore } from '@/store/datasetStore';
 import { datasetStatusColor, formatDateTime } from '@/utils/format';
+import { extractError } from '@/utils/error';
 import { usePolling } from '@/hooks/usePolling';
 
 const { Title, Paragraph, Text } = Typography;
@@ -39,17 +40,6 @@ const FINAL_STATUSES: DatasetStatusName[] = ['ready', 'failed'];
 interface UploadFormValues {
   name: string;
 }
-
-// 提取后端错误信息
-const extractError = (err: unknown): string => {
-  if (axios.isAxiosError(err)) {
-    const detail = err.response?.data?.detail;
-    if (typeof detail === 'string') return detail;
-    return err.message;
-  }
-  if (err instanceof Error) return err.message;
-  return '未知错误';
-};
 
 const DatasetsPage = () => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -148,6 +138,23 @@ const DatasetsPage = () => {
       message.success('删除成功');
       if (currentDataset?.id === id) setCurrentDataset(null);
       setDatasets((prev) => prev.filter((ds) => ds.id !== id));
+    } catch (err) {
+      message.error(extractError(err));
+    }
+  };
+
+  const handleCleanupOrphan = async () => {
+    try {
+      const resp = await datasetsApi.cleanupOrphan();
+      if (resp.count === 0) {
+        message.info('没有需要清理的失败数据集');
+      } else {
+        message.success(`已清理 ${resp.count} 个失败数据集：${resp.deleted_ids.join(', ')}`);
+        if (currentDataset && resp.deleted_ids.includes(currentDataset.id)) {
+          setCurrentDataset(null);
+        }
+      }
+      await fetchAll();
     } catch (err) {
       message.error(extractError(err));
     }
@@ -335,9 +342,21 @@ const DatasetsPage = () => {
       <Card
         title="我的数据集"
         extra={
-          <Button icon={<ReloadOutlined />} onClick={() => fetchAll()} loading={loading}>
-            刷新
-          </Button>
+          <Space>
+            <Popconfirm
+              title="清理失败数据集？"
+              description="将删除当前用户名下所有 status=failed 或缺失向量文件的数据集（含磁盘）。"
+              okType="danger"
+              onConfirm={handleCleanupOrphan}
+            >
+              <Button danger icon={<ClearOutlined />}>
+                清理失败
+              </Button>
+            </Popconfirm>
+            <Button icon={<ReloadOutlined />} onClick={() => fetchAll()} loading={loading}>
+              刷新
+            </Button>
+          </Space>
         }
       >
         {datasets.length === 0 && !loading ? (

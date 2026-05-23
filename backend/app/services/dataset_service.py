@@ -11,11 +11,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import uuid
 from pathlib import Path
 from typing import BinaryIO
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +29,8 @@ from app.models.dataset import Dataset
 logger = get_logger(__name__)
 
 CHUNK_SIZE = 8 * 1024 * 1024
+UMAP_MAX_SAMPLE = 50_000
+UMAP_SAMPLE_SEED = 42
 
 
 def build_raw_path(user_id: int) -> Path:
@@ -76,6 +81,22 @@ async def stream_to_disk(reader: BinaryIO | object, dest: Path) -> int:
             out.write(chunk)
             total += len(chunk)
     return total
+
+
+async def name_exists(db: AsyncSession, *, owner_id: int, name: str) -> bool:
+    """检查指定用户名下是否已存在同名数据集。
+
+    Args:
+        db: 异步数据库会话。
+        owner_id: 拥有者用户 ID。
+        name: 数据集名称（区分大小写、不做 trim）。
+
+    Returns:
+        bool: 存在返回 ``True``，否则 ``False``。
+    """
+    stmt = select(Dataset.id).where(Dataset.owner_id == owner_id, Dataset.name == name).limit(1)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
 
 
 async def create_dataset(
@@ -183,3 +204,133 @@ async def delete_dataset(db: AsyncSession, dataset: Dataset) -> None:
     cleanup_dataset_files(dataset)
     await db.delete(dataset)
     await db.commit()
+
+
+def _is_orphan(dataset: Dataset) -> bool:
+    """判断单个数据集是否为孤儿。
+
+    判定规则：
+        - ``status='failed'``；或
+        - ``status='ready'`` 但 ``vectors_path`` 为空或对应文件已丢失。
+
+    Args:
+        dataset: 待判定的数据集。
+
+    Returns:
+        bool: 是孤儿返回 ``True``，否则 ``False``。
+    """
+    if dataset.status == "failed":
+        return True
+    if dataset.status == "ready":
+        vp = dataset.vectors_path
+        if not vp or not os.path.exists(vp):
+            return True
+    return False
+
+
+async def find_orphan_datasets(db: AsyncSession, owner_id: int) -> list[Dataset]:
+    """查找指定用户名下的孤儿数据集。
+
+    Args:
+        db: 异步数据库会话。
+        owner_id: 拥有者用户 ID。
+
+    Returns:
+        list[Dataset]: 满足孤儿条件的数据集列表。
+    """
+    stmt = select(Dataset).where(Dataset.owner_id == owner_id)
+    result = await db.execute(stmt)
+    rows = list(result.scalars().all())
+    return [ds for ds in rows if _is_orphan(ds)]
+
+
+async def cleanup_orphan_datasets(db: AsyncSession, owner_id: int) -> list[int]:
+    """批量清理孤儿数据集（含磁盘文件），返回被清理的 ID 列表。
+
+    单个清理失败仅记录日志，不影响后续条目继续处理。
+
+    Args:
+        db: 异步数据库会话。
+        owner_id: 拥有者用户 ID。
+
+    Returns:
+        list[int]: 成功清理的数据集 ID 列表。
+    """
+    orphans = await find_orphan_datasets(db, owner_id)
+    deleted: list[int] = []
+    for ds in orphans:
+        ds_id = ds.id
+        try:
+            await delete_dataset(db, ds)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("清理孤儿数据集失败 id=%s err=%s", ds_id, exc)
+            continue
+        deleted.append(ds_id)
+    return deleted
+
+
+def load_umap_2d(
+    dataset_id: int,
+    *,
+    max_sample: int = UMAP_MAX_SAMPLE,
+    seed: int = UMAP_SAMPLE_SEED,
+) -> tuple[list[list[float]] | None, list[str] | None, bool, int]:
+    """读取数据集预处理生成的 UMAP 2D 坐标与对齐的 cell_ids。
+
+    超过 ``max_sample`` 时使用固定种子 ``RandomState(seed)`` 等概率下采样，
+    避免 50 万级数据集把前端浏览器拖崩；下采样后 coords 与 cell_ids 索引保持一致。
+
+    Args:
+        dataset_id: 数据集 ID。
+        max_sample: 触发下采样的阈值与目标规模，默认 50 000。
+        seed: 下采样随机种子，固定后保证可复现。
+
+    Returns:
+        tuple: ``(coords, cell_ids, sampled, total_cells)``。文件缺失时前三项均为
+        ``None / None / False``，``total_cells`` 为 ``0``，调用方据此判断 ``has_umap``。
+    """
+    processed_dir = Path(settings.PROCESSED_DIR) / str(dataset_id)
+    umap_file = processed_dir / "umap_2d.npy"
+    cell_ids_file = processed_dir / "cell_ids.json"
+    if not umap_file.is_file() or not cell_ids_file.is_file():
+        return None, None, False, 0
+
+    try:
+        coords = np.load(umap_file)
+        with cell_ids_file.open(encoding="utf-8") as f:
+            cell_ids: list[str] = [str(cid) for cid in json.load(f)]
+    except (OSError, ValueError) as exc:
+        logger.warning("读取 UMAP 文件失败 dataset_id=%s err=%s", dataset_id, exc)
+        return None, None, False, 0
+
+    if coords.ndim != 2 or coords.shape[1] < 2:
+        logger.warning(
+            "UMAP 坐标维度异常 dataset_id=%s shape=%s",
+            dataset_id,
+            coords.shape,
+        )
+        return None, None, False, 0
+
+    coords = coords[:, :2].astype(np.float32, copy=False)
+    total = int(coords.shape[0])
+    if total != len(cell_ids):
+        logger.warning(
+            "UMAP 与 cell_ids 长度不一致 dataset_id=%s coords=%d cell_ids=%d",
+            dataset_id,
+            total,
+            len(cell_ids),
+        )
+        n = min(total, len(cell_ids))
+        coords = coords[:n]
+        cell_ids = cell_ids[:n]
+        total = n
+
+    sampled = False
+    if total > max_sample:
+        rng = np.random.RandomState(seed)
+        idx = np.sort(rng.choice(total, max_sample, replace=False))
+        coords = coords[idx]
+        cell_ids = [cell_ids[int(i)] for i in idx]
+        sampled = True
+
+    return coords.tolist(), cell_ids, sampled, total
