@@ -492,6 +492,157 @@ hits: [{cell_id, distance, meta}, ...]
 
 ---
 
+<!-- _class: smaller -->
+
+# 7.1 v1.1 性能优化与新功能总览
+
+<span class="muted">v1.0 → v1.1 共新增 **26** 个 commit · 覆盖 **11** 个 feat / perf 任务，全部已落地主分支并配套测试。</span>
+
+| 模块 | 关键优化 | 实测收益 |
+|---|---|---|
+| 缓存 | **F4** IndexCache 启动预热 · **F2** SearchCache (Redis SHA256 key) | 首查零冷启动；`hit_ratio` 实时可监控 |
+| 索引 / 存储 | **F3** `np.load(mmap_mode='r')` · **F5** `VECTORS_DTYPE=float16` 落盘 | 冷启动 RSS **-50%** · 磁盘 **-50%** · Recall@10 仅降 **0.4%** |
+| 算法 | **P2** numba `@njit(parallel=True, fastmath=True)` BruteBackend | 50k×50 数据 conc=1 p50 **1.341 → 0.426 ms (3.15×)** |
+| API | **F1** `/search/batch` · **F6** `/search/by-vector-stream` (SSE) · **F8** Anthropic Claude Opus | 单数据集 N≤50 并发；首条结果即出即推；RAG 三客户端→四客户端 |
+| DB | **P3** `joinedload` 消除 N+1（datasets/index 列表 2→1 SQL） | 列表轮询 QPS 翻倍；SQL count 测试守住回归 |
+| 前端 | **B1** plotly `basic` 瘦身 · **B2** 移动 Drawer · **B3** Skeleton · **D4** vitest hooks/store 单测 | 首屏 bundle 显著瘦身；移动端可用；前端单测覆盖率提升 |
+
+**统一节奏**：每个 feat/perf 都在同一 commit 内带测试 + 文档同步更新（`docs/06_API接口文档.md` 21 → 31 接口）。
+
+---
+
+<!-- _class: smaller -->
+
+# 7.2 双层缓存：IndexCache + Redis SearchCache
+
+<div class="cols">
+
+**L1 · 进程内 IndexCache（LRU, capacity=4）**
+
+```
+请求 → IndexCache.get_or_load(index_id, db)
+        ├─ hit  → move_to_end(), 直接返回 backend 实例
+        └─ miss → create_backend + load(index_path)
+                  插入 OrderedDict，超容量 popitem(last=False)
+```
+
+- **F4 启动预热**：lifespan 内查询 `status=ready` 最近 3 条索引一次性 `load`，消除首查冷启动毛刺。
+- `GET /indexes/cache/stats` 返回 `hits / misses / loads / evictions / hit_ratio / cached_index_ids`。
+- 单进程内 `asyncio.Lock` 串行化同 `index_id` 并发加载，避免重复 IO。
+
+**L2 · 跨进程 Redis SearchCache**
+
+```python
+key = "search:" + sha256(
+    f"v1|{index_id}|{top_k}|{cid_or_vechash}|{filters_json}"
+).hexdigest()
+TTL = settings.SEARCH_CACHE_TTL_SECONDS  # 默认 300s
+```
+
+- **F2** 接入 `by-id / by-vector / batch` 调用链，命中走 `cache_hit=True` 直返。
+- Redis 不可用 → 优雅降级为透传，主链路不阻断（`_errors` 计数器记录异常）。
+- 进程级 `_hits / _misses / _errors` 与 IndexCache stats **同接口拼合**返回。
+
+</div>
+
+**效果**：同一 cell_id 重复查询走 L2 命中即返，省去 numpy + DB 写日志全链路；不同 cell_id 命中 L1 直接拿到 backend，省去磁盘反序列化。
+
+---
+
+<!-- _class: smaller -->
+
+# 7.3 算法 / 数据加速：mmap + float16 + numba
+
+<div class="cols">
+
+**F3 mmap 索引加载**
+
+```python
+arr = np.load(path, mmap_mode="r", allow_pickle=False)
+if arr.dtype == np.float32:
+    self._vectors = arr      # 直接复用 memmap，按页惰性读盘
+else:                         # float16 → float32 显式 astype
+    self._vectors = arr.astype(np.float32, copy=True)
+```
+
+- 大底库冷启动 RSS 减半，按需 page-in。
+- hnswlib 0.8 ``load_index`` 内部已切到 mmap 友好路径，与 F3 协同。
+
+**F5 float16 落盘（消融，N=5000, d=50, l2）**
+
+| backend | dtype | Recall@10 | p95(ms) | QPS(c=1) |
+|---|---|---|---|---|
+| brute | fp32 | 1.0000 | 0.178 | 6 356 |
+| brute | fp16 | 1.0000 | 0.162 | 6 761 |
+| hnswlib | fp32 | 0.9560 | 0.038 | 29 733 |
+| hnswlib | fp16 | **0.9520** | 0.034 | 31 125 |
+
+→ 磁盘 / 冷启动内存 **-50%**，Recall@10 仅降 **0.4%**；与 F3 mmap **正交叠加**。
+
+</div>
+
+**P2 numba BruteBackend**
+
+```python
+@njit(parallel=True, fastmath=True, cache=True)
+def _l2_sq_dists_numba(vectors, query):
+    out = np.empty(vectors.shape[0])
+    for i in prange(vectors.shape[0]):
+        d = 0.0
+        for j in range(vectors.shape[1]):
+            diff = vectors[i, j] - query[j]
+            d += diff * diff
+        out[i] = d
+    return out
+```
+
+- 单线程 caller 走 numba 并行，**50k × 50 数据 conc=1 p50 1.341 → 0.426 ms（3.15×）**。
+- 全局 `threading.Lock` 非阻塞：并发 caller 自动降级到 numpy/BLAS，规避 workqueue 层 thread-safety 崩溃。
+- `BruteBackend(use_numba=False)` 显式禁用；numba 缺失时透明 fallback。
+
+数据均来自 `docs/benchmark_report.md` 5.5 节与 P2 commit。
+
+---
+
+<!-- _class: smaller -->
+
+# 7.4 检索 API 扩展矩阵
+
+| # | 接口 | 关键能力 | 典型用途 |
+|---|---|---|---|
+| F1 | `POST /search/batch` | `queries: [{cell_id, vector}] · 1 ≤ N ≤ 50` · `asyncio.gather` 并发 · 每条独立 SearchCache | 评测脚本一次性提交，全局 `total_latency_ms` + 逐条 `cache_hit` |
+| F6 | `POST /search/by-vector-stream` | `text/event-stream` SSE · `event: hit` 每 ~20ms 推一条 · 末尾 `event: done` 汇总 `latency_ms` | 前端"逐条飞入"动画，消除等待感 |
+| F7 | `POST /search/multi-dataset` | 并发查多数据集 · min-max 归一化 · 全局 Top-K · 标 `source_dataset_id` | 跨数据集 ensemble（v1.0 加分项 ①） |
+| F8 | `LLM_PROVIDER=anthropic` | `AnthropicClient` 接入 Claude Opus 4 · 工厂分支 + 失败自动 fallback Mock | RAG `parse_query` / `summarize` 第四种 LLM |
+
+**F1 batch 请求示例**
+
+```json
+POST /api/v1/search/batch
+{
+  "dataset_id": 1, "index_id": 7, "top_k": 10,
+  "filters": {"cell_type": "hepatocyte"},
+  "queries": [
+    {"cell_id": "AAACCTGAGAATCT-1"},
+    {"vector": [0.12, -0.03, ...]}
+  ]
+}
+```
+
+**F6 SSE 帧（节选）**
+
+```
+event: hit
+data: {"rank":1,"cell_id":"...","distance":0.0034,"meta":{...}}
+
+event: done
+data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
+```
+
+`docs/06_API接口文档.md` v1.1 同步：**21 → 31 个接口**，全部带 OpenAPI description。
+
+---
+
 <!-- _class: cover center -->
 
 # 总结 Conclusion
