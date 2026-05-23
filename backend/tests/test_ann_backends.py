@@ -179,6 +179,46 @@ def test_brute_mmap_load_consistency(
     np.testing.assert_allclose(dist1, dist2, rtol=1e-5)
 
 
+def test_brute_numba_l2_smoke(vectors: np.ndarray, queries: np.ndarray) -> None:
+    """P2 smoke：当 numba 可用时，``BruteBackend`` 的 l2 检索结果应与 numpy 路径一致。
+
+    通过对比 ``use_numba=True`` 与 ``use_numba=False`` 的两个实例，验证：
+        1. numba 路径被实际启用（``numba_active`` 为 ``True``）；
+        2. 返回的 ``indices`` 完全一致（squared L2 严格有序）；
+        3. 返回的 ``distances`` 与 numpy 路径在 ``rtol=1e-5`` 内吻合
+           （fastmath 允许 IEEE 浮点重排序，可能产生极小误差）。
+    若 numba 不可用，``numba_active`` 为 ``False``，等价于跑两次 numpy 路径，
+    测试自动降级仍然通过。
+    """
+    from app.services.ann import brute_backend as _bb
+
+    numba_be = BruteBackend(dim=DIM, metric="l2", use_numba=True)
+    numba_be.build(vectors)
+    if _bb._NUMBA:
+        assert numba_be.numba_active is True
+    idx_numba, dist_numba = numba_be.search(queries, top_k=TOP_K)
+
+    numpy_be = BruteBackend(dim=DIM, metric="l2", use_numba=False)
+    numpy_be.build(vectors)
+    assert numpy_be.numba_active is False
+    idx_numpy, dist_numpy = numpy_be.search(queries, top_k=TOP_K)
+
+    np.testing.assert_array_equal(idx_numba, idx_numpy)
+    np.testing.assert_allclose(dist_numba, dist_numpy, rtol=1e-5, atol=1e-5)
+
+
+def test_brute_numba_top1_full_match(vectors: np.ndarray, queries: np.ndarray) -> None:
+    """numba 加速路径下，top-1 应与暴力 argmin 完全一致（极端情况下兜底校验）。"""
+    backend = BruteBackend(dim=DIM, metric="l2", use_numba=True)
+    backend.build(vectors)
+    idx, _ = backend.search(queries, top_k=1)
+
+    diff = vectors[None, :, :] - queries[:, None, :]
+    sq = (diff * diff).sum(axis=2)
+    expected = np.argmin(sq, axis=1)
+    np.testing.assert_array_equal(idx[:, 0], expected)
+
+
 def test_hnswlib_mmap_load_consistency(
     vectors: np.ndarray, queries: np.ndarray, tmp_path: Path
 ) -> None:

@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 
 from app.api.deps import CurrentUser, DbSession
 from app.api.v1.evaluation import benchmark_result_path
@@ -41,11 +42,21 @@ async def _get_owned_dataset(db, dataset_id: int, user_id: int) -> Dataset:
 
 
 async def _get_owned_index(db, index_id: int, user_id: int) -> tuple[IndexRecord, Dataset]:
-    """读取属于当前用户的索引记录及其数据集。"""
-    record = await db.get(IndexRecord, index_id)
+    """读取属于当前用户的索引记录及其数据集。
+
+    P3 优化：通过 ``joinedload(IndexRecord.dataset)`` 把原来的"先查 IndexRecord
+    再查 Dataset"两次查询合并为单条 LEFT OUTER JOIN，消除潜在的 N+1 模式，
+    在批量调用（如评测页轮询）时显著减少 round-trip。
+    """
+    stmt = (
+        select(IndexRecord)
+        .options(joinedload(IndexRecord.dataset))
+        .where(IndexRecord.id == index_id)
+    )
+    record = (await db.execute(stmt)).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="索引不存在")
-    dataset = await db.get(Dataset, record.dataset_id)
+    dataset = record.dataset
     if dataset is None or dataset.owner_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="索引不存在")
     return record, dataset
@@ -131,7 +142,12 @@ async def create_index(
     "/datasets/{dataset_id}/indexes",
     response_model=list[IndexRecordOut],
     summary="数据集索引列表",
-    description="按 ``created_at`` 倒序返回指定数据集的全部索引记录。",
+    description=(
+        "按 ``created_at`` 倒序返回指定数据集的全部索引记录。\n\n"
+        "P3 优化：通过 ``joinedload(Dataset.indexes)`` 一次性预加载关系，"
+        "把『先校验数据集所有权 + 再查 IndexRecord』的两条 SQL 合并为单条"
+        " LEFT OUTER JOIN，消除 N+1 路径。"
+    ),
 )
 async def list_dataset_indexes(
     dataset_id: int,
@@ -148,14 +164,19 @@ async def list_dataset_indexes(
     Returns:
         list[IndexRecordOut]: 按创建时间倒序的索引列表。
     """
-    await _get_owned_dataset(db, dataset_id, current_user.id)
     stmt = (
-        select(IndexRecord)
-        .where(IndexRecord.dataset_id == dataset_id)
-        .order_by(IndexRecord.created_at.desc())
+        select(Dataset)
+        .options(joinedload(Dataset.indexes))
+        .where(Dataset.id == dataset_id)
     )
-    result = await db.execute(stmt)
-    records = list(result.scalars().all())
+    dataset = (await db.execute(stmt)).unique().scalar_one_or_none()
+    if dataset is None or dataset.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据集不存在")
+    records = sorted(
+        dataset.indexes,
+        key=lambda r: (r.created_at, r.id),
+        reverse=True,
+    )
     return [IndexRecordOut.model_validate(r) for r in records]
 
 

@@ -3,17 +3,23 @@
 覆盖：
     - 未登录请求 ``GET /datasets`` 返回 ``401``；
     - 构造极小 .h5ad，覆盖 ``upload -> list -> status -> get -> delete`` 流程，
-      ARQ 入队通过 monkeypatch 替换为不依赖 Redis 的 stub。
+      ARQ 入队通过 monkeypatch 替换为不依赖 Redis 的 stub；
+    - P3 防御性测试：通过 ``event.listen("after_cursor_execute")`` 抓取真实 SQL，
+      验证 ``GET /datasets/{id}/indexes`` 与 ``GET /indexes/{id}/status``
+      不再触发 N+1 查询。
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -23,6 +29,7 @@ from app.api.v1 import datasets as datasets_module
 from app.core.config import settings
 from app.db.base import Base
 from app.main import app
+from app.models.index_record import IndexRecord
 
 TEST_DSN = "sqlite+aiosqlite:///:memory:"
 _test_engine = create_async_engine(
@@ -399,3 +406,186 @@ async def test_upload_progress_not_found(http_client: AsyncClient) -> None:
         headers=headers,
     )
     assert resp.status_code == 404
+
+
+@contextmanager
+def _capture_select_sql() -> Any:
+    """注册 ``after_cursor_execute`` 监听器，统计 SELECT 语句明细。
+
+    Yields:
+        list[str]: 期间执行过的所有 SELECT 语句快照，调用方可据此断言
+        N+1 是否消除（例如同时命中 ``datasets`` / ``index_records`` 的语句条数）。
+    """
+    statements: list[str] = []
+
+    def _on_after_cursor_execute(
+        conn: Any,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: Any,
+    ) -> None:
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    sync_engine = _test_engine.sync_engine
+    event.listen(sync_engine, "after_cursor_execute", _on_after_cursor_execute)
+    try:
+        yield statements
+    finally:
+        event.remove(sync_engine, "after_cursor_execute", _on_after_cursor_execute)
+
+
+async def _seed_dataset_with_indexes(
+    http_client: AsyncClient,
+    headers: dict[str, str],
+    h5ad_path: Path,
+    *,
+    n_indexes: int = 3,
+) -> int:
+    """上传一个数据集并直接通过 ORM 写入 ``n_indexes`` 条索引记录。
+
+    Args:
+        http_client: 测试客户端。
+        headers: 已登录的 Authorization 头。
+        h5ad_path: 预先生成的 .h5ad 文件路径。
+        n_indexes: 要插入的索引记录数量。
+
+    Returns:
+        int: 数据集 ID。
+    """
+    with h5ad_path.open("rb") as f:
+        resp = await http_client.post(
+            "/api/v1/datasets/upload",
+            headers=headers,
+            files={"file": ("seed.h5ad", f, "application/octet-stream")},
+            data={"name": "seed"},
+        )
+    assert resp.status_code == 201, resp.text
+    dataset_id = int(resp.json()["dataset"]["id"])
+
+    async with _TestSessionLocal() as session:
+        for i in range(n_indexes):
+            record = IndexRecord(
+                dataset_id=dataset_id,
+                backend="brute",
+                metric="l2",
+                params={"i": i},
+                status="ready",
+            )
+            session.add(record)
+        await session.commit()
+    return dataset_id
+
+
+async def test_list_dataset_indexes_no_n_plus_one(
+    http_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P3 防御：``GET /datasets/{id}/indexes`` 应只触发 1 条针对 datasets/index_records 的 SELECT。
+
+    旧实现：先 ``SELECT datasets`` 再 ``SELECT index_records``（两条 SQL）。
+    新实现：``joinedload(Dataset.indexes)`` 合并为单条 ``LEFT OUTER JOIN``，
+    避免在前端轮询索引列表时把 round-trip 放大。
+    """
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "PROCESSED_DIR", str(tmp_path / "processed"))
+    monkeypatch.setattr(settings, "INDEX_DIR", str(tmp_path / "indexes"))
+
+    async def fake_enqueue(dataset_id: int) -> str:
+        return ""
+
+    monkeypatch.setattr(datasets_module, "enqueue_preprocess", fake_enqueue)
+
+    adata = anndata.AnnData(X=np.random.rand(3, 3).astype(np.float32))
+    h5ad_path = tmp_path / "n1.h5ad"
+    adata.write_h5ad(str(h5ad_path))
+
+    headers = await _login(http_client, "n1user", "n1pass00")
+    dataset_id = await _seed_dataset_with_indexes(
+        http_client, headers, h5ad_path, n_indexes=5
+    )
+
+    with _capture_select_sql() as statements:
+        resp = await http_client.get(
+            f"/api/v1/datasets/{dataset_id}/indexes",
+            headers=headers,
+        )
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 5
+
+    target = [
+        s
+        for s in statements
+        if "datasets" in s.lower() or "index_records" in s.lower()
+    ]
+    assert len(target) == 1, (
+        f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(target)
+    )
+    joined = target[0].lower()
+    assert "index_records" in joined and "datasets" in joined, (
+        f"期望 SQL 同时引用 datasets 与 index_records：{joined}"
+    )
+
+
+async def test_get_index_status_no_n_plus_one(
+    http_client: AsyncClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """P3 防御：``GET /indexes/{id}/status`` 应只触发 1 条针对 datasets/index_records 的 SELECT。
+
+    旧实现：``db.get(IndexRecord)`` + ``db.get(Dataset)``（两条 SQL）。
+    新实现：``joinedload(IndexRecord.dataset)`` 把双查询合并为单条 ``LEFT OUTER JOIN``，
+    在评测页轮询场景下显著减少 round-trip。
+    """
+    anndata = pytest.importorskip("anndata")
+    import numpy as np
+
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(settings, "PROCESSED_DIR", str(tmp_path / "processed"))
+    monkeypatch.setattr(settings, "INDEX_DIR", str(tmp_path / "indexes"))
+
+    async def fake_enqueue(dataset_id: int) -> str:
+        return ""
+
+    monkeypatch.setattr(datasets_module, "enqueue_preprocess", fake_enqueue)
+
+    adata = anndata.AnnData(X=np.random.rand(3, 3).astype(np.float32))
+    h5ad_path = tmp_path / "n2.h5ad"
+    adata.write_h5ad(str(h5ad_path))
+
+    headers = await _login(http_client, "n2user", "n2pass00")
+    dataset_id = await _seed_dataset_with_indexes(
+        http_client, headers, h5ad_path, n_indexes=1
+    )
+    async with _TestSessionLocal() as session:
+        row = await session.execute(
+            select(IndexRecord.id).where(IndexRecord.dataset_id == dataset_id)
+        )
+        index_id = int(row.scalar_one())
+
+    with _capture_select_sql() as statements:
+        resp = await http_client.get(
+            f"/api/v1/indexes/{index_id}/status",
+            headers=headers,
+        )
+    assert resp.status_code == 200, resp.text
+
+    target = [
+        s
+        for s in statements
+        if "datasets" in s.lower() or "index_records" in s.lower()
+    ]
+    assert len(target) == 1, (
+        f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(target)
+    )
+    joined = target[0].lower()
+    assert "datasets" in joined and "index_records" in joined, (
+        f"期望 SQL 同时引用 datasets 与 index_records：{joined}"
+    )

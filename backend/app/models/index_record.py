@@ -1,12 +1,15 @@
 """索引记录表 ORM 模型。"""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.dataset import Dataset
 
 
 class IndexRecord(Base):
@@ -23,6 +26,9 @@ class IndexRecord(Base):
         memory_mb: 索引内存占用估计（MB）。
         status: 索引状态，取值 ``building|ready|failed``。
         created_at: 创建时间。
+        dataset: 关联的数据集对象。声明 ``lazy='raise'`` 避免意外懒加载，
+            所有访问都必须通过 ``joinedload(IndexRecord.dataset)`` 等显式预加载，
+            从而避免 N+1 查询场景。
     """
 
     __tablename__ = "index_records"
@@ -42,4 +48,10 @@ class IndexRecord(Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    dataset: Mapped["Dataset"] = relationship(
+        "Dataset",
+        back_populates="indexes",
+        lazy="raise",
     )

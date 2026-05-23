@@ -1,12 +1,15 @@
 """数据集表 ORM 模型。"""
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.index_record import IndexRecord
 
 
 class Dataset(Base):
@@ -24,6 +27,10 @@ class Dataset(Base):
         vector_source: 向量来源，如 ``X_pca``、``X_scvi`` 等。
         meta_columns: 元信息列描述，JSON 形式。
         created_at: 创建时间。
+        indexes: 与本数据集关联的索引记录列表。声明 ``lazy='raise'`` 避免
+            意外的懒加载查询，所有访问都必须通过 ``selectinload`` / ``joinedload``
+            预加载；``passive_deletes=True`` 配合 DB 端 ``ON DELETE CASCADE``
+            自动级联删除，无需 ORM 主动 load children。
     """
 
     __tablename__ = "datasets"
@@ -44,4 +51,12 @@ class Dataset(Base):
     meta_columns: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    indexes: Mapped[list["IndexRecord"]] = relationship(
+        "IndexRecord",
+        back_populates="dataset",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        lazy="raise",
     )

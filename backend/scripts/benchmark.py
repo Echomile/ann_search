@@ -213,6 +213,8 @@ def build_backend(
     name: str,
     base: np.ndarray,
     metric: str,
+    *,
+    use_numba: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
     """根据后端名称创建实例并完成构建。
 
@@ -220,12 +222,20 @@ def build_backend(
         name: 后端名称。
         base: 底库向量。
         metric: 距离度量。
+        use_numba: 仅对 ``brute`` 后端生效；指定为 ``True`` 时若 numba 可用会启用
+            ``@njit(parallel=True)`` 并行加速路径，便于对比 numpy/BLAS 与 numba
+            两种实现的延迟与吞吐差异。
 
     Returns:
         tuple[Any, dict[str, Any]]: ``(backend, build_params)``。
     """
     n, dim = base.shape
-    backend = create_backend(name, dim=dim, metric=metric)
+    if name == "brute":
+        from app.services.ann.brute_backend import BruteBackend
+
+        backend = BruteBackend(dim=dim, metric=metric, use_numba=use_numba)
+    else:
+        backend = create_backend(name, dim=dim, metric=metric)
 
     if name == "faiss-ivfpq":
         params = {
@@ -254,6 +264,8 @@ def measure_backend(
     metric: str,
     ground_truth: dict[int, np.ndarray],
     tmp_dir: Path,
+    *,
+    use_numba: bool = True,
 ) -> dict[str, Any]:
     """对单个后端进行完整基准测试。
 
@@ -267,13 +279,16 @@ def measure_backend(
         ground_truth: 来自 brute 的 ``{k: indices}`` 字典；若 brute 未跑，
             传入空字典则跳过 Recall 评估。
         tmp_dir: 用于 save/load 的临时目录。
+        use_numba: 仅对 ``brute`` 后端生效；为 ``True`` 时会做一次显式 warmup 调用
+            以触发 numba JIT 编译，并把"首次 JIT + 后续 hot"耗时分别打印出来，
+            方便观测 numba 加速效果。
 
     Returns:
         dict[str, Any]: 测量结果。
     """
     print(f"[{name}] 构建索引...", flush=True)
     t_build_start = time.perf_counter()
-    backend, build_params = build_backend(name, base, metric)
+    backend, build_params = build_backend(name, base, metric, use_numba=use_numba)
     build_seconds = time.perf_counter() - t_build_start
     memory_mb = float(backend.memory_mb())
 
@@ -285,6 +300,28 @@ def measure_backend(
         save_seconds = time.perf_counter() - t_save_start
     except Exception as exc:
         print(f"[{name}] save 失败: {exc}", flush=True)
+
+    numba_meta: dict[str, Any] = {}
+    if name == "brute" and getattr(backend, "numba_active", False):
+        warmup_q = queries[: max(1, min(4, queries.shape[0]))]
+        t_jit = time.perf_counter()
+        backend.search(warmup_q, max(1, min(top_k_list[0], base.shape[0])))
+        jit_seconds = time.perf_counter() - t_jit
+        t_hot = time.perf_counter()
+        backend.search(warmup_q, max(1, min(top_k_list[0], base.shape[0])))
+        hot_seconds = time.perf_counter() - t_hot
+        numba_meta = {
+            "active": True,
+            "jit_seconds": float(jit_seconds),
+            "hot_seconds": float(hot_seconds),
+        }
+        print(
+            f"[{name}] numba JIT warmup={jit_seconds * 1000:.1f}ms "
+            f"hot={hot_seconds * 1000:.2f}ms",
+            flush=True,
+        )
+    elif name == "brute":
+        numba_meta = {"active": False}
 
     print(f"[{name}] 构建完成 build={build_seconds:.2f}s mem={memory_mb:.1f}MB", flush=True)
 
@@ -308,7 +345,7 @@ def measure_backend(
             print(f"[{name}] 延迟测试 k={k} conc={cc}", flush=True)
             latency_table[str(k)][str(cc)] = run_latency(backend, queries, k, cc)
 
-    return {
+    result: dict[str, Any] = {
         "name": name,
         "build_seconds": build_seconds,
         "save_seconds": save_seconds,
@@ -318,10 +355,18 @@ def measure_backend(
         "adaptive_meta": {str(k): v for k, v in extra_meta.items()},
         "latency": latency_table,
     }
+    if numba_meta:
+        result["numba_meta"] = numba_meta
+    return result
 
 
 def build_ground_truth(
-    base: np.ndarray, queries: np.ndarray, top_k_list: list[int], metric: str
+    base: np.ndarray,
+    queries: np.ndarray,
+    top_k_list: list[int],
+    metric: str,
+    *,
+    use_numba: bool = True,
 ) -> dict[int, np.ndarray]:
     """用 brute 后端预计算 ground truth。
 
@@ -330,12 +375,14 @@ def build_ground_truth(
         queries: 查询向量。
         top_k_list: 待评估的 ``top_k`` 列表。
         metric: 距离度量。
+        use_numba: ground truth 的 brute 是否启用 numba 加速；语义与
+            :func:`measure_backend` 一致，仅影响 ``brute`` 实例。
 
     Returns:
         dict[int, np.ndarray]: ``{k: indices(M, k)}``。
     """
     print("[gt] 计算 ground truth (brute)...", flush=True)
-    gt_backend, _ = build_backend("brute", base, metric)
+    gt_backend, _ = build_backend("brute", base, metric, use_numba=use_numba)
     max_k = max(top_k_list)
     labels, _ = gt_backend.search(queries, max_k)
     return {k: labels[:, :k].copy() for k in top_k_list}
@@ -601,9 +648,13 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         flush=True,
     )
 
+    use_numba = bool(args.use_numba)
+
     ground_truth: dict[int, np.ndarray] = {}
     if not args.skip_ground_truth:
-        ground_truth = build_ground_truth(base, queries, top_k_list, args.metric)
+        ground_truth = build_ground_truth(
+            base, queries, top_k_list, args.metric, use_numba=use_numba
+        )
 
     with tempfile.TemporaryDirectory(prefix="ann_bench_") as tmp:
         tmp_dir = Path(tmp)
@@ -619,6 +670,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                     metric=args.metric,
                     ground_truth=ground_truth,
                     tmp_dir=tmp_dir,
+                    use_numba=use_numba,
                 )
                 backend_results.append(result)
             except Exception as exc:
@@ -638,6 +690,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "dtype": args.dtype,
             "backends": backend_names,
             "data_source": source_desc,
+            "use_numba": use_numba,
         },
         "backends": [b for b in backend_results if "error" not in b],
         "errors": [b for b in backend_results if "error" in b],
@@ -687,6 +740,20 @@ def parse_args() -> argparse.Namespace:
         default="float32",
         help="向量落盘精度模拟；指定 ``float16`` 会把 base/queries 先经一次 fp16 round-trip "
         "再喂给后端，用于评估 F5 半精度压缩对召回的影响。",
+    )
+    parser.add_argument(
+        "--use-numba",
+        dest="use_numba",
+        action="store_true",
+        default=True,
+        help="brute 后端启用 numba 并行加速（默认开启）。首次调用会触发 JIT 编译（~1s），"
+        "之后命中磁盘缓存。",
+    )
+    parser.add_argument(
+        "--no-use-numba",
+        dest="use_numba",
+        action="store_false",
+        help="禁用 brute 后端的 numba 加速，用于对比 numpy/BLAS 基线。",
     )
     return parser.parse_args()
 
