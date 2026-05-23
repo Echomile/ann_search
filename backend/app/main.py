@@ -18,10 +18,52 @@ from fastapi.responses import JSONResponse
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.logging import get_logger, setup_logging
-from app.db.session import async_engine
+from app.db.session import AsyncSessionLocal, async_engine
+from app.models.index_record import IndexRecord
+from app.services.ann.cache import IndexCache
 
 setup_logging()
 logger = get_logger(__name__)
+
+
+async def _warmup_index_cache(limit: int = 3) -> None:
+    """启动预热：把最近的 ready 索引加载进 :class:`IndexCache`。
+
+    Args:
+        limit: 最多预热的索引数量，受 IndexCache.capacity 约束。
+
+    任何异常都被吞掉并降级为 warning：预热失败不能阻断服务启动。
+    """
+    from sqlalchemy import select  # noqa: PLC0415
+
+    cache = IndexCache.instance()
+    try:
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                select(IndexRecord.id)
+                .where(IndexRecord.status == "ready")
+                .order_by(IndexRecord.created_at.desc())
+                .limit(limit)
+            )
+            rows = (await session.execute(stmt)).scalars().all()
+            if not rows:
+                logger.info("warmup 跳过：没有 ready 索引")
+                return
+            ok = 0
+            for index_id in rows:
+                try:
+                    await cache.get_or_load(int(index_id), session)
+                    ok += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("warmup 加载索引失败 index_id=%s: %s", index_id, exc)
+            logger.info(
+                "warmup 完成：成功 %d/%d 个索引（cache.stats=%s）",
+                ok,
+                len(rows),
+                cache.stats(),
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("warmup 过程异常（已忽略不阻断启动）：%s", exc)
 
 
 @asynccontextmanager
@@ -42,6 +84,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:  # noqa: BLE001
         logger.warning("ARQ 连接初始化失败，将以离线模式启动：%s", exc)
         app.state.arq = None
+
+    # F4 warmup：预加载最近创建的 ≤3 个 ready 索引到 IndexCache，消除首查冷启动。
+    await _warmup_index_cache(limit=3)
+
     try:
         yield
     finally:
