@@ -26,8 +26,10 @@ export const evaluationApi = {
     return data;
   },
 
-  searchStats: async (): Promise<SearchStats> => {
-    const { data } = await httpClient.get<SearchStats>('/stats/search');
+  searchStats: async (datasetId?: number): Promise<SearchStats> => {
+    const { data } = await httpClient.get<SearchStats>('/stats/search', {
+      params: datasetId !== undefined ? { dataset_id: datasetId } : undefined,
+    });
     return data;
   },
 };

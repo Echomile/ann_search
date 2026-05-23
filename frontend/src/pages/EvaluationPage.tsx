@@ -111,10 +111,10 @@ const EvaluationPage = () => {
     }
   }, []);
 
-  const loadSearchStats = useCallback(async () => {
+  const loadSearchStats = useCallback(async (datasetId?: number) => {
     setStatsLoading(true);
     try {
-      const stats = await evaluationApi.searchStats();
+      const stats = await evaluationApi.searchStats(datasetId);
       setSearchStats(stats);
     } catch (err) {
       message.error(extractError(err));
@@ -128,6 +128,12 @@ const EvaluationPage = () => {
     void loadHistory();
     void loadSearchStats();
   }, [loadDatasets, loadHistory, loadSearchStats]);
+
+  useEffect(() => {
+    if (watchedDatasetId !== undefined && watchedDatasetId !== null) {
+      void loadSearchStats(watchedDatasetId);
+    }
+  }, [watchedDatasetId, loadSearchStats]);
 
   useEffect(() => {
     if (!currentDataset) return;
@@ -515,7 +521,7 @@ const EvaluationPage = () => {
         extra={
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => loadSearchStats()}
+            onClick={() => loadSearchStats(watchedDatasetId)}
             loading={statsLoading}
           >
             刷新
