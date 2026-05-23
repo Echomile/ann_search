@@ -69,3 +69,8 @@ htmlcov/
 # OS
 .DS_Store
 .claude-tasks/
+
+# 演示视频中间产物（保留最终 demo_final.mp4）
+docs/video/demo_screen.webm
+docs/video/narration_full.m4a
+docs/video/narration/
