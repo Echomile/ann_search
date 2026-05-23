@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import numpy as np
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.models.dataset import Dataset
+from app.models.search_log import SearchLog
 from app.services.ann.brute_backend import BruteBackend
 
 logger = get_logger(__name__)
@@ -223,3 +227,183 @@ def benchmark_index(
         recalls,
     )
     return result
+
+
+def _to_naive_utc(value: datetime) -> datetime:
+    """统一时间表示：将 aware datetime 转为 UTC naive，已是 naive 则原样返回。"""
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
+
+
+async def _percentile_via_sql_or_numpy(
+    db: AsyncSession,
+    *,
+    base_filter: list[Any],
+    percentile: float,
+) -> float:
+    """计算 ``latency_ms`` 在给定过滤条件下的某个分位数。
+
+    优先尝试 PostgreSQL 原生 ``percentile_cont(p).within_group(...)``；
+    若数据库不支持（典型情况 SQLite + aiosqlite），自动 rollback 后回退到
+    拉取 latency 列再用 :func:`numpy.percentile` 计算。
+
+    Args:
+        db: 异步数据库会话。
+        base_filter: ``SearchLog`` 上的过滤表达式列表。
+        percentile: 分位数百分比，取值范围 0~100。
+
+    Returns:
+        float: 指定分位的延迟（毫秒），无数据返回 ``0.0``。
+    """
+    frac = float(percentile) / 100.0
+    try:
+        value = await db.scalar(
+            select(
+                func.percentile_cont(frac).within_group(SearchLog.latency_ms.asc())
+            ).where(*base_filter, SearchLog.latency_ms.isnot(None))
+        )
+        return float(value) if value is not None else 0.0
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("percentile_cont 不可用, fallback numpy: p=%s err=%s", percentile, exc)
+        await db.rollback()
+
+    latencies_raw = (
+        await db.execute(
+            select(SearchLog.latency_ms).where(
+                *base_filter, SearchLog.latency_ms.isnot(None)
+            )
+        )
+    ).scalars().all()
+    latencies = [float(v) for v in latencies_raw if v is not None]
+    if not latencies:
+        return 0.0
+    return float(np.percentile(np.asarray(latencies, dtype=np.float64), percentile))
+
+
+async def compute_search_log_stats(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    dataset_id: int | None = None,
+) -> dict[str, Any]:
+    """聚合指定用户的检索日志统计。
+
+    通过 SQLAlchemy 异步聚合避免拉全表，关键指标计算如下：
+
+    - ``total_queries``：``COUNT(*)``；
+    - ``overall_avg_latency_ms``：``AVG(latency_ms)``；
+    - ``overall_p95_latency_ms``：优先 PostgreSQL 原生 ``percentile_cont``，
+      失败时回退到拉取 latency 列再用 :func:`numpy.percentile`（兼容 SQLite 测试环境）；
+    - ``by_dataset``：按 ``dataset_id`` 分组，左连接 :class:`Dataset` 取名称，
+      每个数据集再单独算 P95；
+    - ``hourly_24h``：固定 24 个滚动 1 小时桶，``bucket[i] = [now - (24-i)h, now - (23-i)h]``，
+      数组最后一个为 ``[now - 1h, now]``。无 ``date_trunc`` 依赖，跨数据库行为一致，
+      也避免了"在 ``now.minute < 30`` 时 30min 前的事件落入前一整点桶"的语义不稳定。
+
+    Args:
+        db: 异步数据库会话。
+        user_id: 当前用户 ID，用于过滤日志。
+        dataset_id: 仅统计指定数据集，``None`` 表示全部。
+
+    Returns:
+        dict[str, Any]: 匹配 :class:`app.schemas.evaluation.SearchLogStats` 的字典。
+    """
+    base_filter: list[Any] = [SearchLog.user_id == user_id]
+    if dataset_id is not None:
+        base_filter.append(SearchLog.dataset_id == dataset_id)
+
+    now = datetime.now(tz=UTC)
+    day_ago = now - timedelta(days=1)
+
+    total_queries = int(
+        await db.scalar(select(func.count()).select_from(SearchLog).where(*base_filter)) or 0
+    )
+
+    avg_value = await db.scalar(select(func.avg(SearchLog.latency_ms)).where(*base_filter))
+    overall_avg_latency_ms = float(avg_value) if avg_value is not None else 0.0
+
+    overall_p95_latency_ms = (
+        await _percentile_via_sql_or_numpy(db, base_filter=base_filter, percentile=95)
+        if total_queries > 0
+        else 0.0
+    )
+
+    by_dataset_rows = (
+        await db.execute(
+            select(
+                SearchLog.dataset_id,
+                Dataset.name,
+                func.count(SearchLog.id).label("cnt"),
+                func.avg(SearchLog.latency_ms).label("avg_lat"),
+            )
+            .join(Dataset, Dataset.id == SearchLog.dataset_id, isouter=True)
+            .where(*base_filter)
+            .group_by(SearchLog.dataset_id, Dataset.name)
+            .order_by(func.count(SearchLog.id).desc())
+        )
+    ).all()
+
+    by_dataset: list[dict[str, Any]] = []
+    for row in by_dataset_rows:
+        ds_id = int(row.dataset_id)
+        per_filter = [*base_filter, SearchLog.dataset_id == ds_id]
+        ds_p95 = await _percentile_via_sql_or_numpy(db, base_filter=per_filter, percentile=95)
+        by_dataset.append(
+            {
+                "dataset_id": ds_id,
+                "dataset_name": row.name or f"#{ds_id}",
+                "total_queries": int(row.cnt),
+                "avg_latency_ms": float(row.avg_lat) if row.avg_lat is not None else 0.0,
+                "p95_latency_ms": ds_p95,
+            }
+        )
+
+    naive_now = _to_naive_utc(now)
+    bucket_starts: list[datetime] = [
+        naive_now - timedelta(hours=24 - i) for i in range(24)
+    ]
+    bucket_counts = [0] * 24
+    bucket_lats: list[list[float]] = [[] for _ in range(24)]
+
+    raw_rows = (
+        await db.execute(
+            select(SearchLog.created_at, SearchLog.latency_ms).where(
+                *base_filter, SearchLog.created_at >= day_ago
+            )
+        )
+    ).all()
+    for created_at, lat in raw_rows:
+        if created_at is None or not isinstance(created_at, datetime):
+            continue
+        ts = _to_naive_utc(created_at)
+        hours_ago = (naive_now - ts).total_seconds() / 3600.0
+        if hours_ago < 0:
+            hours_ago = 0.0
+        if hours_ago >= 24:
+            continue
+        idx = 23 - int(hours_ago)
+        idx = max(0, min(23, idx))
+        bucket_counts[idx] += 1
+        if lat is not None:
+            bucket_lats[idx].append(float(lat))
+
+    hourly_24h: list[dict[str, Any]] = []
+    for i, start in enumerate(bucket_starts):
+        lats = bucket_lats[i]
+        avg = float(sum(lats) / len(lats)) if lats else 0.0
+        hourly_24h.append(
+            {
+                "hour_iso": start.isoformat() + "Z",
+                "queries": int(bucket_counts[i]),
+                "avg_latency_ms": avg,
+            }
+        )
+
+    return {
+        "total_queries": total_queries,
+        "overall_avg_latency_ms": overall_avg_latency_ms,
+        "overall_p95_latency_ms": overall_p95_latency_ms,
+        "by_dataset": by_dataset,
+        "hourly_24h": hourly_24h,
+    }
