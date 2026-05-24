@@ -246,3 +246,269 @@ async def test_search_log_stats_with_data(stats_session: AsyncSession) -> None:
     only_a = await compute_search_stats(stats_session, user_id=user_id, dataset_id=ds_a_id)
     assert only_a["total_queries"] == 2
     assert {b["dataset_id"] for b in only_a["by_dataset"]} == {ds_a_id}
+
+
+# ---------------------------------------------------------------------------
+# v1.2 加分项 C3: 参数扫描 (recall-QPS 帕累托曲线) 测试
+# ---------------------------------------------------------------------------
+
+
+def test_pareto_marking() -> None:
+    """给定固定 ``(recall, qps)`` 数组，验证帕累托标记。"""
+    from app.services.evaluation import _mark_pareto
+
+    # 四个点：(0.5, 100) 被 (0.9, 100) 支配；(0.9, 50) 被 (0.9, 100) 支配；
+    # (0.7, 80) 被 (0.9, 100) 支配；(0.9, 100) 不被任何点支配。
+    points = [(0.5, 100.0), (0.9, 50.0), (0.7, 80.0), (0.9, 100.0)]
+    assert _mark_pareto(points) == [False, False, False, True]
+
+    # 单调上升 (recall 升, qps 升)：右上角的点完全支配其他点
+    rising = [(0.5, 10.0), (0.7, 50.0), (0.9, 200.0)]
+    assert _mark_pareto(rising) == [False, False, True]
+
+    # 单调反向 (recall 升, qps 降)：每个点都不被支配，全部在前沿
+    inverse = [(0.5, 500.0), (0.7, 200.0), (0.9, 50.0)]
+    assert _mark_pareto(inverse) == [True, True, True]
+
+    # 两点相同：互不支配（严格大于不成立）
+    same = [(0.8, 100.0), (0.8, 100.0)]
+    assert _mark_pareto(same) == [True, True]
+
+    # 空数组
+    assert _mark_pareto([]) == []
+
+
+@pytest_asyncio.fixture
+async def sweep_session(tmp_path) -> AsyncGenerator[tuple[AsyncSession, int], None]:
+    """构造一个 SQLite in-memory 会话 + 已写盘的小数据集，便于 sweep 测试复用。
+
+    Yields:
+        tuple[AsyncSession, int]: ``(session, dataset_id)``。
+    """
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    session_local = async_sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+        autoflush=False,
+        autocommit=False,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # 写 vectors.npy（N=200，dim=8）到 tmp_path/dataset
+    rng = np.random.default_rng(2025)
+    vectors = rng.normal(size=(200, 8)).astype(np.float32)
+    dataset_dir = tmp_path / "ds"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    np.save(dataset_dir / "vectors.npy", vectors)
+
+    async with session_local() as session:
+        user = User(username="sweep_user", password_hash="x")
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+        ds = Dataset(
+            owner_id=int(user.id),
+            name="sweep_ds",
+            h5ad_path=str(dataset_dir / "sweep.h5ad"),
+            vectors_path=str(dataset_dir / "vectors.npy"),
+            status="ready",
+            cell_count=200,
+            vector_dim=8,
+            vector_source="X_pca",
+        )
+        session.add(ds)
+        await session.commit()
+        await session.refresh(ds)
+        dataset_id = int(ds.id)
+
+        try:
+            yield session, dataset_id
+        finally:
+            await session.rollback()
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
+
+
+async def test_param_sweep_returns_points(
+    sweep_session: tuple[AsyncSession, int],
+) -> None:
+    """对 N=200/dim=8 的小数据集扫两个 backend × 3 个 ef 值，断言点数与 pareto 标记。"""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from app.models.sweep import SweepPoint, SweepRun
+    from app.services.evaluation import param_sweep
+
+    session, dataset_id = sweep_session
+
+    run_id = await param_sweep(
+        session=session,
+        dataset_id=dataset_id,
+        backends=["hnswlib", "brute"],
+        top_k=5,
+        query_count=20,
+        ef_search_grid=[16, 32, 64],
+        user_id=None,
+    )
+    assert isinstance(run_id, int) and run_id > 0
+
+    stmt = select(SweepRun).where(SweepRun.id == run_id).options(selectinload(SweepRun.points))
+    res = await session.execute(stmt)
+    run = res.scalar_one()
+    assert run.status == "done"
+    assert run.finished_at is not None
+    assert run.error is None
+
+    points: list[SweepPoint] = list(run.points)
+    # hnswlib 三个 ef + brute 一个点 = 4
+    assert len(points) == 4
+    by_backend: dict[str, list[SweepPoint]] = {}
+    for p in points:
+        by_backend.setdefault(p.backend, []).append(p)
+    assert len(by_backend["hnswlib"]) == 3
+    assert len(by_backend["brute"]) == 1
+
+    # brute 的 recall 必为 1.0
+    brute_p = by_backend["brute"][0]
+    assert brute_p.recall == pytest.approx(1.0)
+    assert brute_p.params_json == {}
+
+    # 每个点字段完整
+    for p in points:
+        assert 0.0 <= float(p.recall) <= 1.0
+        assert float(p.qps) >= 0.0
+        assert float(p.p50_ms) >= 0.0
+        assert float(p.p95_ms) >= float(p.p50_ms)
+        assert float(p.mem_mb) >= 0.0
+
+    # 至少有一个点在 pareto 前沿
+    assert any(bool(p.on_pareto) for p in points)
+
+
+async def test_get_sweep_endpoint(tmp_path, monkeypatch) -> None:
+    """端到端验证 ``POST /sweep`` → ``GET /sweep/{id}`` → ``GET /pareto`` 三连。"""
+    from collections.abc import AsyncGenerator as _AsyncGen
+
+    from httpx import ASGITransport, AsyncClient
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.api.deps import get_db
+    from app.main import app
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    session_local = async_sessionmaker(
+        bind=engine,
+        expire_on_commit=False,
+        class_=AsyncSession,
+        autoflush=False,
+        autocommit=False,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def _override_get_db() -> _AsyncGen[AsyncSession, None]:
+        async with session_local() as s:
+            yield s
+
+    # 写 vectors.npy
+    rng = np.random.default_rng(7)
+    vectors = rng.normal(size=(120, 8)).astype(np.float32)
+    dataset_dir = tmp_path / "endpoint_ds"
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    np.save(dataset_dir / "vectors.npy", vectors)
+
+    app.dependency_overrides[get_db] = _override_get_db
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            # 注册 + 登录
+            reg = await client.post(
+                "/api/v1/auth/register",
+                json={"username": "sweep_e2e", "password": "p@ss12345"},
+            )
+            assert reg.status_code == 201, reg.text
+            login = await client.post(
+                "/api/v1/auth/login",
+                data={"username": "sweep_e2e", "password": "p@ss12345"},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+            # 拿到 user.id，再写 Dataset
+            async with session_local() as s:
+                u = (await s.execute(select(User).where(User.username == "sweep_e2e"))).scalar_one()
+                ds = Dataset(
+                    owner_id=int(u.id),
+                    name="endpoint_ds",
+                    h5ad_path=str(dataset_dir / "x.h5ad"),
+                    vectors_path=str(dataset_dir / "vectors.npy"),
+                    status="ready",
+                    cell_count=120,
+                    vector_dim=8,
+                    vector_source="X_pca",
+                )
+                s.add(ds)
+                await s.commit()
+                await s.refresh(ds)
+                dataset_id = int(ds.id)
+
+            # 触发扫描
+            resp = await client.post(
+                "/api/v1/evaluation/sweep",
+                headers=headers,
+                json={
+                    "dataset_id": dataset_id,
+                    "backends": ["hnswlib", "brute"],
+                    "top_k": 5,
+                    "query_count": 20,
+                    "ef_search_grid": [16, 32],
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["status"] == "done"
+            sweep_id = int(body["id"])
+            # 2 hnswlib + 1 brute = 3
+            assert len(body["points"]) == 3
+            assert body["pareto_count"] >= 1
+            # recall 升序
+            recalls = [p["recall"] for p in body["points"]]
+            assert recalls == sorted(recalls)
+
+            # GET /sweep/{id}
+            resp = await client.get(f"/api/v1/evaluation/sweep/{sweep_id}", headers=headers)
+            assert resp.status_code == 200, resp.text
+            got = resp.json()
+            assert got["id"] == sweep_id
+            assert len(got["points"]) == 3
+
+            # GET pareto
+            resp = await client.get(f"/api/v1/evaluation/sweep/{sweep_id}/pareto", headers=headers)
+            assert resp.status_code == 200, resp.text
+            pareto = resp.json()
+            assert all(p["on_pareto"] for p in pareto["points"])
+            assert pareto["pareto_count"] == len(pareto["points"])
+
+            # 不存在的 id
+            resp = await client.get("/api/v1/evaluation/sweep/9999", headers=headers)
+            assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await engine.dispose()
+        monkeypatch.undo()

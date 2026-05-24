@@ -6,6 +6,14 @@
 from app.models.dataset import Dataset
 from app.models.index_record import IndexRecord
 from app.models.search_log import SearchLog
+from app.models.sweep import SweepPoint, SweepRun
 from app.models.user import User
 
-__all__ = ["User", "Dataset", "IndexRecord", "SearchLog"]
+__all__ = [
+    "User",
+    "Dataset",
+    "IndexRecord",
+    "SearchLog",
+    "SweepRun",
+    "SweepPoint",
+]
