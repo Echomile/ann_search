@@ -1,4 +1,4 @@
-"""演示视频录制脚本：Playwright + 内置视频录制 + 中文 TTS。
+"""演示视频录制脚本：Playwright + 内置视频录制 + 中文神经语音 TTS。
 
 设计：
     - 用 Playwright 录制完整端到端浏览器操作，输出 webm（无音频）
@@ -6,24 +6,41 @@
     - 节点之间用 page.wait_for_timeout 等待时间与配音长度对齐
     - 最终用 ffmpeg 把多段 TTS 音频拼接到 webm 上
 
+旁白合成：
+    默认使用 ``edge-tts``（Microsoft Edge 神经语音，免费、无需 API Key），
+    可通过环境变量切换音色 / 语速：
+
+        DEMO_TTS_VOICE  默认 ``zh-CN-YunyangNeural`` (云扬·新闻播音腔)
+                        可选 ``zh-CN-YunjianNeural``  (云健·稳重)
+                             ``zh-CN-XiaoxuanNeural`` (晓萱·清新)
+                             ``zh-CN-XiaoxiaoNeural`` (晓晓·温柔)
+        DEMO_TTS_RATE   默认 ``+0%``，信息密集段建议 ``-5%``
+
+    若 edge-tts 调用失败（断网、被风控等），自动降级回 macOS 自带
+    ``say -v Tingting``，保证视频仍可产出。
+
 运行：
     cd backend && uv run python ../e2e/demo_video.py
 
 依赖：
     - playwright（已装）
     - 系统 Chrome
-    - macOS say + afconvert（无需 brew 安装）
-    - ffmpeg（可选，用于合成最终 mp4）
+    - edge-tts (``uv sync --extra video``，需联网；离线时自动降级到 say)
+    - macOS say + afconvert（仅作降级 fallback）
+    - ffmpeg（必装，用于格式转换与合成）
 
 输出：
     docs/video/demo_screen.webm     — 屏幕录制（playwright）
-    docs/video/narration/*.aiff     — 每段配音
+    docs/video/narration/*.mp3      — edge-tts 原始 mp3
+    docs/video/narration/*.m4a      — 转码后用于 concat 的 AAC 音频
     docs/video/narration_full.m4a   — 拼接后的完整音轨
-    docs/video/demo_final.mp4       — 最终合成视频（需要 ffmpeg）
+    docs/video/demo_final.mp4       — 最终合成视频
 """
 
 from __future__ import annotations
 
+import asyncio
+import os
 import shutil
 import subprocess
 import sys
@@ -43,6 +60,30 @@ NARR_DIR = VIDEO_DIR / "narration"
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 NARR_DIR.mkdir(parents=True, exist_ok=True)
 
+TTS_VOICE = os.getenv("DEMO_TTS_VOICE", "zh-CN-YunyangNeural")
+TTS_RATE = os.getenv("DEMO_TTS_RATE", "+0%")
+
+
+def _edge_tts_save(text: str, out: Path, *, voice: str, rate: str) -> None:
+    """用 edge-tts 把单段文本合成为 mp3。
+
+    Args:
+        text: 待合成的中文旁白。
+        out: 输出 mp3 路径。
+        voice: Microsoft Edge 神经语音 ShortName，例如 ``zh-CN-YunyangNeural``。
+        rate: 语速调整，``+0%`` 为默认，``-5%`` 表示放慢 5%。
+
+    Raises:
+        Exception: 网络异常、风控或参数不合法时由 edge-tts / aiohttp 抛出，
+            上层负责捕获并降级到 macOS ``say``。
+    """
+    import edge_tts
+
+    async def _run() -> None:
+        await edge_tts.Communicate(text=text, voice=voice, rate=rate).save(str(out))
+
+    asyncio.run(_run())
+
 
 @dataclass
 class Step:
@@ -53,7 +94,24 @@ class Step:
     action: callable  # 接收 page 参数
 
     def synth_narration(self) -> Path:
-        """用 macOS say + afconvert 生成 m4a 音频。"""
+        """合成本段旁白为 m4a，优先 edge-tts，失败时降级 macOS ``say``。"""
+        m4a = NARR_DIR / f"{self.name}.m4a"
+        mp3 = NARR_DIR / f"{self.name}.mp3"
+        try:
+            _edge_tts_save(self.narration, mp3, voice=TTS_VOICE, rate=TTS_RATE)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(mp3), "-c:a", "aac", str(m4a)],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return m4a
+        except Exception as exc:
+            print(f"[tts] edge-tts 失败，降级 say: {exc}")
+            return self._synth_with_say()
+
+    def _synth_with_say(self) -> Path:
+        """降级路径：用 macOS ``say`` + ``afconvert`` 生成 m4a。"""
         aiff = NARR_DIR / f"{self.name}.aiff"
         m4a = NARR_DIR / f"{self.name}.m4a"
         subprocess.run(

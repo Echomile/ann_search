@@ -264,7 +264,7 @@ v1.1 同期还落地了 **P1~P4 性能优化**（100k 真机基准 / numba JIT 3
 
 ## 演示资源
 
-- **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（**7 分 42 秒**，1440×900，Playwright 自动驱动 + macOS Tingting 中文配音，15 段覆盖登录 → 上传 → 索引 → 检索 → 可视化 → 评测 → RAG → admin → SearchLog Dashboard → IndexDetail → SSE / ensemble）。
+- **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（**7 分 42 秒**，1440×900，Playwright 自动驱动 + 中文神经语音配音，15 段覆盖登录 → 上传 → 索引 → 检索 → 可视化 → 评测 → RAG → admin → SearchLog Dashboard → IndexDetail → SSE / ensemble）。
 - **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（**31 张**，含 v1.1 / v1.2 演进专题页；Marp Markdown 一键生成）。
 - **配音讲稿**：[`docs/slides/speaker_notes.md`](docs/slides/speaker_notes.md)。
 - **端到端测试**：

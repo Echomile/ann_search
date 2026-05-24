@@ -7,6 +7,10 @@
 
 v1.2.0 之后的 **polish patch**：把 v1.2.0 release 中标记为"可选"的 4 项 polish 待办全部落地，无破坏性改动，所有现有接口与 schema 保持不变。
 
+### 演示视频 Demo
+
+- **演示视频旁白引擎升级**：`e2e/demo_video.py` 从 macOS `say -v Tingting` 切换为 Microsoft Edge 神经语音（默认 `zh-CN-YunyangNeural` 央视播音腔），断网时自动降级回 `say`，消除原有机械感。新增可选依赖组 `backend/pyproject.toml` `[project.optional-dependencies].video = ["edge-tts>=7.2"]`。
+
 ### 文档与可视化 Docs / Viz
 
 - **polish(d7) §9 真实数据回填**（commit `e7bb21a`）：把 D7 跨数据集对齐章节从占位升级为真实 3-way split 数据实测。新增 `backend/scripts/alignment_offline.py` 离线对比脚本 + `backend/scripts/alignment_plot.py` 3 子图 PNG 导出器；用 `liver.h5ad` PCA 30D N=69032 切 3-way split 100 queries 实测：

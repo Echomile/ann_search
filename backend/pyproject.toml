@@ -43,6 +43,7 @@ dev = [
 ]
 video = [
     "edge-tts>=7.2",
+    "imageio-ffmpeg>=0.5",
 ]
 
 [build-system]
