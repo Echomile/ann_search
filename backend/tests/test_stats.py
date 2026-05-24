@@ -6,11 +6,15 @@
 覆盖：
     - 无日志时 ``total_queries=0``、``by_dataset=[]``、``hourly_24h`` 长度 24；
     - 插入多条 :class:`SearchLog` 后聚合数值（total / avg / p95 / by_dataset）
-      与 numpy 的 ``np.percentile`` 期望一致。
+      与 numpy 的 ``np.percentile`` 期望一致；
+    - F13 ``/stats/search-logs/export`` 的 CSV / JSON / 权限过滤路径。
 """
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
@@ -27,6 +31,7 @@ from app.db.base import Base
 from app.main import app
 from app.models.dataset import Dataset
 from app.models.search_log import SearchLog
+from app.services.stats import EXPORT_CSV_FIELDS
 
 TEST_DSN = "sqlite+aiosqlite:///:memory:"
 _test_engine = create_async_engine(
@@ -210,3 +215,104 @@ async def test_search_stats_isolates_users(http_client: AsyncClient) -> None:
     body = resp.json()
     assert body["total_queries"] == 0
     assert body["by_dataset"] == []
+
+
+async def _seed_dataset_and_logs(
+    user_id: int, count: int, *, dataset_name: str = "export-ds"
+) -> tuple[int, list[int]]:
+    """为指定用户造一个数据集 + ``count`` 条 SearchLog，返回 ``(dataset_id, log_ids)``。"""
+    log_ids: list[int] = []
+    base = datetime.now(tz=UTC) - timedelta(minutes=count)
+    async with _TestSessionLocal() as session:
+        ds = Dataset(
+            owner_id=user_id, name=dataset_name, h5ad_path=f"/tmp/{dataset_name}.h5ad", status="ready"
+        )
+        session.add(ds)
+        await session.flush()
+        ds_id = int(ds.id)
+        for offset in range(count):
+            log = SearchLog(
+                dataset_id=ds_id,
+                user_id=user_id,
+                top_k=10,
+                filters=None,
+                latency_ms=float(offset + 1) * 5.0,
+                created_at=base + timedelta(minutes=offset),
+            )
+            session.add(log)
+            await session.flush()
+            log_ids.append(int(log.id))
+        await session.commit()
+    return ds_id, log_ids
+
+
+async def test_export_search_logs_csv_default(http_client: AsyncClient) -> None:
+    """默认 ``format=csv``：返回 ``text/csv`` 流，首行为固定表头且数据行数匹配。"""
+    headers, user_id = await _login(http_client, "export_csv", "passw0rd")
+    _, log_ids = await _seed_dataset_and_logs(user_id, count=3)
+
+    resp = await http_client.get("/api/v1/stats/search-logs/export", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert "text/csv" in resp.headers["content-type"].lower()
+
+    reader = csv.reader(io.StringIO(resp.text))
+    rows = list(reader)
+    assert rows[0] == list(EXPORT_CSV_FIELDS)
+    data_rows = rows[1:]
+    assert len(data_rows) == len(log_ids)
+    id_col = EXPORT_CSV_FIELDS.index("id")
+    user_col = EXPORT_CSV_FIELDS.index("user_id")
+    assert [int(r[id_col]) for r in data_rows] == sorted(log_ids)
+    assert all(int(r[user_col]) == user_id for r in data_rows)
+
+
+async def test_export_search_logs_json_format(http_client: AsyncClient) -> None:
+    """``format=json`` 返回 ``{items, total, truncated}`` 结构，items 数量与种子数据一致。"""
+    headers, user_id = await _login(http_client, "export_json", "passw0rd")
+    _, log_ids = await _seed_dataset_and_logs(user_id, count=4)
+
+    resp = await http_client.get(
+        "/api/v1/stats/search-logs/export",
+        params={"format": "json"},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("application/json")
+
+    body = json.loads(resp.text)
+    assert set(body.keys()) >= {"items", "total", "truncated"}
+    assert body["total"] == len(log_ids)
+    assert body["truncated"] is False
+    assert len(body["items"]) == len(log_ids)
+    assert all(item["user_id"] == user_id for item in body["items"])
+    assert [item["id"] for item in body["items"]] == sorted(log_ids)
+
+
+async def test_export_search_logs_admin_sees_all_users(http_client: AsyncClient) -> None:
+    """admin（首个注册者）可以看到全部用户日志；普通用户只能看到自己。"""
+    headers_admin, admin_id = await _login(http_client, "export_admin", "passw0rd")
+    headers_user, normal_id = await _login(http_client, "export_user", "passw0rd")
+
+    _, admin_log_ids = await _seed_dataset_and_logs(admin_id, count=2, dataset_name="admin-ds")
+    _, user_log_ids = await _seed_dataset_and_logs(normal_id, count=3, dataset_name="user-ds")
+
+    resp = await http_client.get(
+        "/api/v1/stats/search-logs/export",
+        params={"format": "json"},
+        headers=headers_admin,
+    )
+    assert resp.status_code == 200, resp.text
+    admin_body = json.loads(resp.text)
+    admin_user_ids = {item["user_id"] for item in admin_body["items"]}
+    assert admin_user_ids == {admin_id, normal_id}
+    assert admin_body["total"] == len(admin_log_ids) + len(user_log_ids)
+
+    resp = await http_client.get(
+        "/api/v1/stats/search-logs/export",
+        params={"format": "json"},
+        headers=headers_user,
+    )
+    assert resp.status_code == 200, resp.text
+    user_body = json.loads(resp.text)
+    assert user_body["total"] == len(user_log_ids)
+    assert {item["user_id"] for item in user_body["items"]} == {normal_id}
