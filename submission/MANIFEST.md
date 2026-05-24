@@ -100,7 +100,7 @@
 | --- | --- | --- |
 | 多数据集联合检索 | [`backend/app/api/v1/search.py`](../backend/app/api/v1/search.py) · `multi_dataset_search` | `asyncio.gather` 并发查多索引 + min-max 归一化 + 重排 |
 | ANN 算法改进 | [`backend/app/services/ann/adaptive_hnsw_backend.py`](../backend/app/services/ann/adaptive_hnsw_backend.py) | 自适应 ef_search：首轮 gap 早停 + 升档至上限 512 |
-| RAG 自然语言查询 | [`backend/app/services/rag.py`](../backend/app/services/rag.py) · [`backend/app/api/v1/rag.py`](../backend/app/api/v1/rag.py) | parse → search → summarize；Mock / 通义千问 / OpenAI / **Anthropic Claude** 四客户端 |
+| RAG 自然语言查询 | [`backend/app/services/rag.py`](../backend/app/services/rag.py) · [`backend/app/api/v1/rag.py`](../backend/app/api/v1/rag.py) | parse → search → summarize；`MockLLMClient`（默认零依赖）+ `AnthropicClient`（Claude Opus 4.7）双客户端，失败自动 fallback |
 
 ### 6.2 v1.1.0 工程优化八项（F1~F8）
 

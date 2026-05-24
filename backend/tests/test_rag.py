@@ -307,7 +307,7 @@ def test_anthropic_client_parse_query_mock(monkeypatch: pytest.MonkeyPatch) -> N
     fake_module = _build_fake_anthropic_module(payload, captured=captured)
     monkeypatch.setitem(sys.modules, "anthropic", fake_module)
 
-    client = AnthropicClient(model="claude-opus-4-20250514", api_key="sk-test")
+    client = AnthropicClient(model="claude-opus-4-7", api_key="sk-test")
     parsed = client.parse_query(
         "找 hepatocyte",
         available_filters=["cell_type", "tissue"],
@@ -319,7 +319,7 @@ def test_anthropic_client_parse_query_mock(monkeypatch: pytest.MonkeyPatch) -> N
     assert parsed.intent == "查找 hepatocyte"
     kwargs = captured["kwargs"]
     assert isinstance(kwargs, dict)
-    assert kwargs["model"] == "claude-opus-4-20250514"
+    assert kwargs["model"] == "claude-opus-4-7"
     assert kwargs["messages"][0]["role"] == "user"  # type: ignore[index]
 
 
@@ -328,7 +328,7 @@ def test_anthropic_client_parse_query_fallback(monkeypatch: pytest.MonkeyPatch) 
     fake_module = _build_fake_anthropic_module(RuntimeError("anthropic api boom"))
     monkeypatch.setitem(sys.modules, "anthropic", fake_module)
 
-    client = AnthropicClient(model="claude-opus-4-20250514", api_key="sk-test")
+    client = AnthropicClient(model="claude-opus-4-7", api_key="sk-test")
     parsed = client.parse_query(
         "找肝细胞 hepatocyte，top 5",
         available_filters=["cell_type", "tissue"],

@@ -45,7 +45,7 @@ router = APIRouter(prefix="/rag", tags=["rag"])
         "- 返回 ``tool_trace`` 暴露 LLM 调用过哪些工具（透明度），"
         "``citations`` 给出被引用的 ``cell_id``+``dataset_id``；\n"
         "- ``LLM_PROVIDER=mock`` 时全程零外部依赖，"
-        "真实 LLM (openai / dashscope / anthropic) 失败自动回退 mock。"
+        "``LLM_PROVIDER=anthropic`` 调用 Claude Opus 4.7 并在失败时自动回退 mock。"
     ),
 )
 async def chat_query(

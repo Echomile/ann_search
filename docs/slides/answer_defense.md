@@ -149,7 +149,7 @@ style: |
 | 缓存 | Redis 7 | 查询缓存 + ARQ broker |
 | ANN 引擎 | FAISS · HNSWLIB · scikit-learn | 5 种后端 (HNSW · IVF-PQ · Brute · Adaptive) |
 | 单细胞 | scanpy · anndata · numpy · scipy | h5ad 读取 · PCA / UMAP |
-| LLM | DashScope · OpenAI 兼容 · Mock | RAG 自然语言查询 |
+| LLM | Anthropic Claude Opus 4.7 · Mock (关键词规则) | RAG 自然语言查询 |
 | 基础设施 | Docker Compose · Nginx · GitHub Actions · pre-commit | 部署 · CI · 代码规范 |
 | 包管理 | uv (后端) · pnpm (前端) | 快速可复现安装 |
 
@@ -389,15 +389,14 @@ hits: [{cell_id, distance, meta}, ...]
  组织分布以 liver 为主；排名第一的 cell_id 为 ..."
 ```
 
-**三客户端协议化设计** —— 无外网也可演示
+**双客户端协议化设计** —— 无外网也可演示
 
 | Client | 用途 |
 |---|---|
 | `MockLLMClient` | 规则解析（关键词词典），默认启用，CI 友好 |
-| `DashScopeLLMClient` | 通义千问 (qwen-plus) |
-| `OpenAILLMClient` | OpenAI / OpenAI 兼容端点 |
+| `AnthropicClient` | Claude Opus 4.7 (`claude-opus-4-7`)，最新 GA flagship |
 
-回退策略：真实 LLM 失败 → 自动降级 Mock，**保证可用性**。
+回退策略：真实 LLM 失败 / SDK 缺失 → 自动降级 Mock，**保证可用性**。
 
 ---
 
@@ -896,7 +895,7 @@ async def chat_with_tools(session, user, query,
             return resp.content
 ```
 
-4 个 LLM client (mock/openai/dashscope/anthropic) 全部适配；`RagSession / RagMessage` 多轮持久化。
+双 LLM client (mock + anthropic) 适配同一 Agent loop 协议；`RagSession / RagMessage` 多轮持久化。
 
 </div>
 

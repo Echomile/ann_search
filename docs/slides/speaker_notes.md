@@ -26,7 +26,7 @@
 
 ## Slide 6：技术栈
 
-后端选了 Python 三点十二加 FastAPI，纯异步路由，配合 SQLAlchemy 二代的 async 引擎。前端用 React 十九加 TypeScript，可视化交给 Plotly。向量引擎方面，FAISS 和 HNSWLIB 同时引入，scikit-learn 提供精确检索作为基准。大模型支持通义千问和 OpenAI 兼容协议，没有外网时自动退到 Mock。基础设施加了 GitHub Actions 和 pre-commit，保证代码质量。
+后端选了 Python 三点十二加 FastAPI，纯异步路由，配合 SQLAlchemy 二代的 async 引擎。前端用 React 十九加 TypeScript，可视化交给 Plotly。向量引擎方面，FAISS 和 HNSWLIB 同时引入，scikit-learn 提供精确检索作为基准。大模型接入 Anthropic Claude Opus 四点七，没有外网时自动退到 Mock 关键词规则。基础设施加了 GitHub Actions 和 pre-commit，保证代码质量。
 
 ## Slide 7：ANN 引擎抽象
 
@@ -54,7 +54,7 @@
 
 ## Slide 13：扩展功能三 RAG 自然语言
 
-RAG 模块的设计核心是 parse、search、summarize 三步。用户输入自然语言，比如"找二十个像肝细胞的内皮细胞"，LLM 先解析成结构化参数：过滤条件 cell_type 等于 endothelial、Top-K 等于二十；然后用过滤命中的第一条向量做相似检索；最后再让 LLM 对结果生成中文总结。三个客户端协议化设计，DashScope、OpenAI、Mock 可切换，没外网时也能完整演示。
+RAG 模块的设计核心是 parse、search、summarize 三步。用户输入自然语言，比如"找二十个像肝细胞的内皮细胞"，LLM 先解析成结构化参数：过滤条件 cell_type 等于 endothelial、Top-K 等于二十；然后用过滤命中的第一条向量做相似检索；最后再让 LLM 对结果生成中文总结。两个客户端协议化设计，Anthropic Claude Opus 四点七和 Mock 可切换，没外网时也能完整演示。
 
 ## Slide 14：实测数据
 

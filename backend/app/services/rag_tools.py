@@ -17,9 +17,8 @@
       避免一次工具失败把整个 agent loop 打断。
     - 工具函数全部 ``async``（即使内部纯 numpy 计算也用 :func:`asyncio.to_thread`
       卸载到线程池），统一被 :func:`execute_tool` 调度。
-    - 工具 schema 同时兼容 OpenAI / Anthropic / DashScope 的 function calling 协议：
-      ``{name, description, input_schema}``，OpenAI 适配层会再裹一层
-      ``{type: "function", function: {...}}``。
+    - 工具 schema 采用 Anthropic 原生 function calling 协议：
+      ``{name, description, input_schema}``。
 """
 
 from __future__ import annotations

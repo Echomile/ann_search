@@ -4,8 +4,8 @@
     - :class:`LLMClient`         : 客户端协议，含 v1.1 ``parse_query``/``summarize``
       与 v1.2 ``chat_with_tools`` 三个方法。
     - :class:`MockLLMClient`     : 纯规则解析 + 规则 tool_call 模拟，默认启用、无外部依赖。
-    - :class:`DashScopeLLMClient`/:class:`OpenAILLMClient`/:class:`AnthropicClient` :
-      真实 LLM 实现；调用 function calling 失败时统一回退到 :class:`MockLLMClient`。
+    - :class:`AnthropicClient`   : 基于 ``anthropic>=0.40`` SDK 的 Claude Opus 4.7 客户端；
+      调用 function calling 失败时统一回退到 :class:`MockLLMClient`。
     - :func:`get_llm_client`     : 根据 :data:`settings.LLM_PROVIDER` 返回对应实例。
     - :func:`rag_answer`         : v1.1 单轮主流程，供旧版接口保留兼容。
     - :func:`chat_with_tools`    : v1.2 多轮 agent loop 主流程，供新版 ``/rag/query``。
@@ -187,7 +187,7 @@ class ChatResponse:
 
 
 # =============================================================================
-# LLMClient 协议 + 4 个实现（mock / dashscope / openai / anthropic）
+# LLMClient 协议 + 2 个实现（mock / anthropic）
 # =============================================================================
 
 
@@ -517,235 +517,6 @@ def _coerce_parsed(
     )
 
 
-def _openai_tools_payload(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """把通用 TOOLS_SCHEMA 转成 OpenAI function calling 协议。"""
-    return [
-        {
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t["description"],
-                "parameters": t["input_schema"],
-            },
-        }
-        for t in tools
-    ]
-
-
-class DashScopeLLMClient:
-    """基于 dashscope SDK 的通义千问客户端。"""
-
-    def __init__(self, model: str, api_key: str) -> None:
-        """初始化客户端。
-
-        Args:
-            model: 模型名，例如 ``qwen-plus``。
-            api_key: DashScope API Key。
-
-        Raises:
-            RuntimeError: 缺少 API Key 或 SDK 不可用时抛出。
-        """
-        if not api_key:
-            raise RuntimeError("DashScopeLLMClient 需要 LLM_API_KEY")
-        try:
-            import dashscope  # type: ignore  # noqa: F401
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("缺少 dashscope SDK，请先安装") from exc
-        self.model = model
-        self.api_key = api_key
-
-    def _call(self, prompt: str) -> str:
-        """同步调用 DashScope generation 接口，返回模型文本输出。"""
-        import dashscope  # type: ignore
-
-        response = dashscope.Generation.call(
-            model=self.model,
-            api_key=self.api_key,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            result_format="message",
-        )
-        try:
-            return response.output.choices[0].message.content  # type: ignore[no-any-return]
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(f"DashScope 返回解析失败: {response}") from exc
-
-    def parse_query(self, query: str, available_filters: list[str]) -> ParsedQuery:
-        """调用大模型解析查询为 JSON 参数。"""
-        prompt = (
-            f"available_filters = {available_filters}\n"
-            f"用户问题: {query}\n"
-            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, "top_k": 10, "intent": "..."}'
-        )
-        try:
-            raw_text = self._call(prompt)
-            return _coerce_parsed(_safe_json_loads(raw_text), available_filters, default_top_k=10)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("DashScope parse_query 失败，回退 mock: %s", exc)
-            return MockLLMClient().parse_query(query, available_filters)
-
-    def summarize(self, query: str, hits: list[dict[str, Any]]) -> str:
-        """调用大模型对检索结果生成自然语言总结。"""
-        digest = json.dumps(hits[:10], ensure_ascii=False, default=str)
-        prompt = (
-            f"用户原始问题: {query}\n"
-            f"以下是相似细胞检索结果（JSON，至多 10 条）:\n{digest}\n"
-            "请用中文给出 3-5 句总结，包含命中数量、主要细胞类型、组织/疾病分布与代表 cell_id。"
-        )
-        try:
-            return self._call(prompt).strip()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("DashScope summarize 失败，回退 mock: %s", exc)
-            return MockLLMClient().summarize(query, hits)
-
-    def chat_with_tools(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
-    ) -> ChatResponse:
-        """调用 DashScope 兼容的 OpenAI function calling 协议。
-
-        DashScope 提供 OpenAI 兼容入口（``compatible-mode/v1``），
-        但 SDK 直接走 ``Generation.call`` 时 function calling 需要传 ``tools``。
-        本实现失败回退到 :class:`MockLLMClient`，保证 mock 仍可用。
-        """
-        try:
-            import dashscope  # type: ignore
-
-            response = dashscope.Generation.call(
-                model=self.model,
-                api_key=self.api_key,
-                messages=messages,
-                tools=_openai_tools_payload(tools),
-                result_format="message",
-            )
-            choice = response.output.choices[0].message  # type: ignore[union-attr]
-            tool_calls_raw = getattr(choice, "tool_calls", None) or []
-            if tool_calls_raw:
-                tool_calls = []
-                for tc in tool_calls_raw:
-                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
-                    arguments = fn.get("arguments", "{}")
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError:
-                            arguments = {}
-                    tool_calls.append(
-                        ToolCall(
-                            id=str(tc.get("id") or f"call_{uuid.uuid4().hex[:8]}"),
-                            name=str(fn.get("name")),
-                            arguments=arguments or {},
-                        )
-                    )
-                return ChatResponse(finish_reason="tool_calls", tool_calls=tool_calls)
-            return ChatResponse(finish_reason="stop", content=str(choice.get("content") or ""))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("DashScope chat_with_tools 失败，回退 mock: %s", exc)
-            return MockLLMClient().chat_with_tools(messages, tools)
-
-
-class OpenAILLMClient:
-    """基于 openai SDK 的客户端，兼容 DashScope 的 OpenAI 接口。"""
-
-    def __init__(self, model: str, api_key: str, base_url: str = "") -> None:
-        """初始化 OpenAI 兼容客户端。
-
-        Args:
-            model: 模型名，例如 ``gpt-4o-mini``。
-            api_key: API Key。
-            base_url: OpenAI 兼容 endpoint；为空时使用 SDK 默认值。
-
-        Raises:
-            RuntimeError: 缺少 API Key 或 SDK 不可用时抛出。
-        """
-        if not api_key:
-            raise RuntimeError("OpenAILLMClient 需要 LLM_API_KEY")
-        try:
-            from openai import OpenAI  # type: ignore
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("缺少 openai SDK，请先安装") from exc
-        self.model = model
-        self._client = OpenAI(api_key=api_key, base_url=base_url or None)
-
-    def _call(self, prompt: str) -> str:
-        """同步调用 OpenAI ChatCompletion 接口。"""
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.0,
-        )
-        return resp.choices[0].message.content or ""
-
-    def parse_query(self, query: str, available_filters: list[str]) -> ParsedQuery:
-        """调用大模型解析查询。"""
-        prompt = (
-            f"available_filters = {available_filters}\n"
-            f"用户问题: {query}\n"
-            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, "top_k": 10, "intent": "..."}'
-        )
-        try:
-            return _coerce_parsed(
-                _safe_json_loads(self._call(prompt)), available_filters, default_top_k=10
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("OpenAI parse_query 失败，回退 mock: %s", exc)
-            return MockLLMClient().parse_query(query, available_filters)
-
-    def summarize(self, query: str, hits: list[dict[str, Any]]) -> str:
-        """调用大模型生成自然语言总结。"""
-        digest = json.dumps(hits[:10], ensure_ascii=False, default=str)
-        prompt = (
-            f"用户原始问题: {query}\n"
-            f"以下是相似细胞检索结果（JSON，至多 10 条）:\n{digest}\n"
-            "请用中文给出 3-5 句总结，包含命中数量、主要细胞类型、组织/疾病分布与代表 cell_id。"
-        )
-        try:
-            return self._call(prompt).strip()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("OpenAI summarize 失败，回退 mock: %s", exc)
-            return MockLLMClient().summarize(query, hits)
-
-    def chat_with_tools(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
-    ) -> ChatResponse:
-        """调用 OpenAI ChatCompletion + function calling 协议。"""
-        try:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=_openai_tools_payload(tools),
-                temperature=0.0,
-            )
-            choice = resp.choices[0]
-            msg = choice.message
-            tool_calls_raw = getattr(msg, "tool_calls", None) or []
-            if tool_calls_raw:
-                tool_calls = []
-                for tc in tool_calls_raw:
-                    arguments = tc.function.arguments
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError:
-                            arguments = {}
-                    tool_calls.append(
-                        ToolCall(
-                            id=str(tc.id),
-                            name=str(tc.function.name),
-                            arguments=arguments or {},
-                        )
-                    )
-                return ChatResponse(finish_reason="tool_calls", tool_calls=tool_calls)
-            return ChatResponse(finish_reason="stop", content=str(msg.content or ""))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("OpenAI chat_with_tools 失败，回退 mock: %s", exc)
-            return MockLLMClient().chat_with_tools(messages, tools)
-
-
 class AnthropicClient:
     """基于 anthropic SDK 的 Claude Opus 客户端。
 
@@ -763,7 +534,7 @@ class AnthropicClient:
         """初始化 Anthropic 客户端。
 
         Args:
-            model: Claude 模型名，例如 ``claude-opus-4-20250514``。
+            model: Claude 模型名，例如 ``claude-opus-4-7``（最新 GA flagship）。
             api_key: Anthropic API Key。
             max_tokens: 单次响应最大生成 token 数；总结场景 1024 通常足够。
 
@@ -944,17 +715,9 @@ def get_llm_client() -> LLMClient:
     """
     provider = settings.LLM_PROVIDER
     try:
-        if provider == "dashscope":
-            return DashScopeLLMClient(model=settings.LLM_MODEL, api_key=settings.LLM_API_KEY)
-        if provider == "openai":
-            return OpenAILLMClient(
-                model=settings.LLM_MODEL,
-                api_key=settings.LLM_API_KEY,
-                base_url=settings.LLM_BASE_URL,
-            )
         if provider == "anthropic":
             api_key = settings.ANTHROPIC_API_KEY or settings.LLM_API_KEY
-            model = settings.LLM_MODEL or "claude-opus-4-20250514"
+            model = settings.LLM_MODEL or "claude-opus-4-7"
             return AnthropicClient(model=model, api_key=api_key)
     except Exception as exc:  # noqa: BLE001
         logger.warning("初始化 LLM 客户端失败（provider=%s），回退 mock: %s", provider, exc)

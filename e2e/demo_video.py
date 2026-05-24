@@ -432,8 +432,7 @@ STEPS: list[Step] = [
             "大模型会自动解析为结构化的检索参数，"
             "包括 cell type、disease、Top K 等字段，"
             "再调用 ANN 检索接口拿到结果，最后由大模型生成中文的总结回答。"
-            "系统抽象了一个 LLM Client 协议，支持 Mock 规则解析、"
-            "阿里通义千问、OpenAI 三种实现，"
+            "系统抽象了一个 LLM Client 协议，支持 Mock 规则解析和 Anthropic Claude Opus 4.7 两种实现，"
             "默认 Mock 零依赖即可工作，无需任何 API Key。"
         ),
         action=step_rag,
