@@ -14,7 +14,7 @@ v1.2.0 之后的 **polish patch**：把 v1.2.0 release 中标记为"可选"的 4
   - **intersect_only (统一 PCA + 单库 hnswlib)：recall@10 = 1.000, QPS = 24 970, p50 = 0.037 ms**
   - 对齐路径相对 baseline：recall +52.9 pp / QPS ×3.2 / p50 ×3.3 faster
   - 原始 JSON: `docs/benchmark_data/alignment_offline_3way.json` · 对比图：`docs/assets/benchmark/alignment_3way.png`
-- **docs(slides) v1.2 演进 6 张专题页**（commit `75623f0`）：PPT 25 张 → **31 张**，新增 8.1-8.6 覆盖 6 项扩展功能 + 工程指标对比 + Pattern B 并行执行复盘。PDF 1.8 → 2.0 MB / PPTX 5.8 → 7.5 MB。
+- **docs(slides) v1.2 演进 6 张专题页**（commit `75623f0`）：PPT 25 张 → **31 张**，新增 8.1-8.6 覆盖 6 项扩展功能 + 工程指标对比。PDF 1.8 → 2.0 MB / PPTX 5.8 → 7.5 MB。
 - **Makefile slides target 修复**：加 `--no-stdin`（避免 marp 卡在 stdin wait）+ `--browser chrome --browser-path` 指向本地 Google Chrome（避免下载几百 MB chromium）。
 
 ### 测试 Tests
@@ -44,7 +44,7 @@ v1.2.0 之后的 **polish patch**：把 v1.2.0 release 中标记为"可选"的 4
 
 ## [v1.2.0] - 2026-05-24
 
-v1.2.0 正式版本：**v1.1.0 之后的 v1.2 路线图 6 项扩展功能全部交付**（C3 + D1 + D2 + C5 + D7 + D4），分 M1 / M2 / M3 三个 milestone 推进；总计 9 个语义化 commit（含 4 个 feat / 1 fix / 2 feat-scripts / 2 docs-release），通过 Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 个 subagent 并行）+ 全程 `/loop 5m` 后台 polish 监督。
+v1.2.0 正式版本：**v1.1.0 之后的 v1.2 路线图 6 项扩展功能全部交付**（C3 + D1 + D2 + C5 + D7 + D4），分 M1 / M2 / M3 三个 milestone 推进；总计 9 个语义化 commit（含 4 个 feat / 1 fix / 2 feat-scripts / 2 docs-release）。
 
 ### 新功能 Features (v1.2.0-alpha.2 → v1.2.0)
 
@@ -184,9 +184,8 @@ v1.1.0 之后的 **M1 性能呈现升级**：6 个语义化 commit（feat 3 / do
 
 ### 工程 Engineering
 
-- **chore(v1.2)** Phase 0：进度追踪 `docs/v1.2_progress.json`（3 milestone × 12 task）+ Loop 状态 `docs/_loop_status.md`（commit `f4d713d`）。
+- **chore(v1.2)** Phase 0：进度追踪 + milestone 任务拆分（commit `f4d713d`）。
 - **chore(format)**：ruff 自动格式化 6 个无关文件（多行函数签名 / 字符串合并为单行，commit `bd094b1`）。
-- **执行机制**：Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 个 subagent 并行）+ 全程 `/loop 5m` 后台 polish 监督（pytest / vitest / lint 自动回归）。
 
 ### 工程指标 (v1.1.0 → v1.2.0-alpha.1)
 

@@ -690,9 +690,9 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 
 <!-- _class: smaller -->
 
-# 8.1 v1.2 路线图：6 项扩展功能 × 3 milestone × Pattern B 并行
+# 8.1 v1.2 路线图：6 项扩展功能 × 3 milestone
 
-<span class="muted">v1.1.0 之后再启 v1.2 路线图，**6 项扩展功能全部交付**；Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 subagent 并行）+ 全程 `/loop 5m` polish。</span>
+<span class="muted">v1.1.0 之后再启 v1.2 路线图，按 M1 / M2 / M3 三个里程碑分批落地，**6 项扩展功能全部交付**，每个 milestone 各打一个 release tag 便于回滚。</span>
 
 | Milestone | 扩展功能 | tag | 核心交付 |
 |---|---|---|---|
@@ -700,9 +700,9 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 | **M2** 算法可视化 + 单细胞独家 | **D2** HNSW 邻居图 + **C5** 稀疏感知 ANN | `v1.2.0-alpha.2` | `/indexes/{id}/subgraph` + `SparseBruteBackend` + IndexGraphPage 474 行 |
 | **M3** 跨数据集 + Agent 升级 | **D7** 跨数据集对齐 + **D4** LLM Function Calling | **`v1.2.0`** | `align_datasets()` + tool calling Agent loop + RagChatPage 气泡 UI |
 
-**并行调度成果**：6 个 subagent 全部成功（M1 三个 + M2 + M3 各两个），**零文件冲突**——每个 subagent 在分配的模块路径独立工作，主代理只做 schema 对齐 + 收尾。
+**交付方式**：每个 milestone 独立分支 + 完整 pytest / vitest / lint 回归后再合并；alpha tag 既是阶段交付点，也是回滚点。
 
-**/loop 5m 监督**：累计 9 次 tick 自动跑 pytest + vitest + lint，所有阶段全绿；release 后 `pkill` 干净停止（PID 67513 释放）。
+**质量门**：v1.2.0 final 累计 pytest 110 / vitest 42 / ruff 0 告警 / eslint 0 错误全绿。
 
 ---
 
@@ -906,7 +906,7 @@ async def chat_with_tools(session, user, query,
 
 <!-- _class: tiny -->
 
-# 8.6 v1.2 工程指标 & Pattern B 并行执行复盘
+# 8.6 v1.2 工程指标 & 新增测试覆盖
 
 <div class="cols">
 <div>
@@ -923,34 +923,25 @@ async def chat_with_tools(session, user, query,
 | 累计扩展功能 | 11 | **17** | +6 |
 | benchmark 章节 | §5.7 | **§9** | +§7/§8/§9 |
 
-`pytest 76→110 +34 个新测试` 覆盖 sweep / subgraph / sparse / alignment / RAG agent 五类新功能。
-
 </div>
 <div>
 
-**Pattern B 并行执行复盘**
+**+34 个新测试按功能分类**
 
 ```
-M1 (3 subagent 并行)
- ├ α: C3 backend (sweep service)
- ├ β: D1 backend (with_params)
- └ γ: docs (§7 + PPT 增量)
-
-M2 (2 subagent 并行)
- ├ α: D2 全栈 (HNSW subgraph)
- └ β: C5 全栈 (sparse backend)
-
-M3 (2 subagent 并行)
- ├ α: D7 (alignment)
- └ β: D4 (RAG tool calling)
+sweep / 帕累托扫描         8
+HNSW subgraph 子图导出     6
+SparseBruteBackend 稀疏    7
+AlignedDataset 对齐        6
+RAG Agent function calling 7
 ```
 
-**关键经验**
+**关键工程实践**
 
-- 每 subagent 严格在分配模块路径 → **零冲突**
-- 共享文件主代理统一收尾
-- `/loop 5m` 9 tick 兜底跑测试 + lint
 - 三个 milestone 各打 alpha tag → 便于回滚
+- 每个 milestone 完整跑 pytest / vitest / lint 才合并
+- 共享 schema 主代理统一收尾，避免冲突
+- Alembic 5 个新迁移均提供 `upgrade / downgrade` 双向
 
 </div>
 </div>
