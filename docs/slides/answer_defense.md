@@ -643,21 +643,278 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 
 ---
 
+<!-- _class: smaller -->
+
+# 8.1 v1.2 路线图：6 项加分 × 3 milestone × Pattern B 并行
+
+<span class="muted">v1.1.0 之后再启 v1.2 路线图，**6 项加分功能全部交付**；Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 subagent 并行）+ 全程 `/loop 5m` polish。</span>
+
+| Milestone | 加分项 | tag | 核心交付 |
+|---|---|---|---|
+| **M1** 性能呈现升级 | **C3** recall-QPS 帕累托 + **D1** 交互仪表盘 | `v1.2.0-alpha.1` | 3 sweep REST + `/search/with_params` + EvaluationPage 双 Tab |
+| **M2** 算法可视化 + 单细胞独家 | **D2** HNSW 邻居图 + **C5** 稀疏感知 ANN | `v1.2.0-alpha.2` | `/indexes/{id}/subgraph` + `SparseBruteBackend` + IndexGraphPage 474 行 |
+| **M3** 跨数据集 + Agent 升级 | **D7** 跨数据集对齐 + **D4** LLM Function Calling | **`v1.2.0`** | `align_datasets()` + tool calling Agent loop + RagChatPage 气泡 UI |
+
+**并行调度成果**：6 个 subagent 全部成功（M1 三个 + M2 + M3 各两个），**零文件冲突**——每个 subagent 在分配的模块路径独立工作，主代理只做 schema 对齐 + 收尾。
+
+**/loop 5m 监督**：累计 9 次 tick 自动跑 pytest + vitest + lint，所有阶段全绿；release 后 `pkill` 干净停止（PID 67513 释放）。
+
+---
+
+<!-- _class: smaller -->
+
+# 8.2 C3 加分：recall-QPS 帕累托曲线（ANN-Benchmarks 风格）
+
+<div class="cols">
+
+**后端 sweep 服务**
+
+```python
+async def param_sweep(session, dataset_id,
+        backends, top_k, query_count,
+        ef_search_grid, nprobe_grid):
+    # 1. 加载 vectors.npy + 抽 query
+    # 2. BruteBackend 作 ground truth
+    # 3. 每个 backend build 一次, 复用
+    # 4. 扫 ef_search ∈ [16,32,64,128,256,512]
+    #    或 nprobe ∈ [4,8,16,32,64,128]
+    # 5. _mark_pareto((recall, qps))
+    # 6. 落 sweep_runs + sweep_points
+```
+
+`backend/scripts/sweep_offline.py` 提供离线 CLI，复用同一套纯函数。
+
+**真实 liver PCA 30D N=30000 实测**（5 帕累托前沿）
+
+| backend | params | recall | QPS | pareto |
+|---|---|---:|---:|:-:|
+| faiss-hnsw | ef=16 | 0.9945 | **123k** | ✓ |
+| faiss-hnsw | ef=32 | 0.9985 | 86k | ✓ |
+| faiss-hnsw | ef=64 | 0.9990 | 54k | ✓ |
+| hnswlib | ef=16 | 0.9880 | **141k** | ✓ |
+| hnswlib | ef=128 | 1.0000 | 34k | ✓ |
+| brute | — | 1.0000 | 4 189 | · |
+| faiss-ivfpq | nprobe=128 | 0.48 | 23k | · |
+
+</div>
+
+![Pareto Curve](../assets/benchmark/pareto_pca30.png)
+
+→ 完整 25 数据点 + 5 帕累托前沿见 `docs/sweep_real_liver_pca30.json` + `docs/benchmark_report.md` §7。
+
+---
+
+<!-- _class: smaller -->
+
+# 8.3 D1 + D2 加分：交互仪表盘 + HNSW 邻居图可视化
+
+<div class="cols">
+
+**D1 交互式参数仪表盘**
+
+```python
+@router.post("/search/with_params")
+async def search_with_params(req):
+    # 1. IndexCache 拿 backend (不重建!)
+    # 2. _apply_query_param(ef_search/nprobe)
+    # 3. try: search → finally: restore params
+    return {hits, effective_params, ignored_params}
+```
+
+前端 `SweepTab.tsx` 三栏：
+- **左**：滑块 `ef_search 8-512` / `nprobe 1-256`
+- **中**：Plotly 散点 → `onClick` 反查回滑块
+- **右**：debounce 200ms 实时 Top-K 预览
+
+**D2 HNSW 邻居图可视化**
+
+```python
+def get_local_subgraph(entry_label, depth, layer, max_nodes):
+    # 1. hnswlib.get_neighbors_list(layer=0)
+    # 2. BFS 从 entry 展开 depth 跳
+    # 3. 边只在 depth_visited[src] < depth 时添加
+    # 4. max_nodes 安全截断
+    return {nodes, edges, truncated}
+```
+
+前端 `IndexGraphPage.tsx` 474 行：
+- 节点 + 边 Plotly 双 trace
+- 查询起点 ★ + depth=1 橙 + depth>=2 灰
+- depth/layer/max_nodes 控件
+
+</div>
+
+→ 让"召回-性能权衡"和"HNSW 小世界图"概念可见可触，答辩演示效果直接拉满。
+
+---
+
+<!-- _class: smaller -->
+
+# 8.4 C5 加分：稀疏感知 ANN — 单细胞独家卖点
+
+<span class="muted">单细胞 RNA-seq 表达矩阵天然稀疏（90%+ 基因为 0）。常规走 PCA 降到 30~50 维稠密向量，会丢失稀有基因的强表达信号。</span>
+
+<div class="cols">
+
+**SparseBruteBackend (230 行)**
+
+```python
+# 底库 scipy.sparse.csr_matrix
+# 距离 = ||a||² + ||b||² - 2 a·b
+# 稀疏-稠密点积 BLAS 加速
+# 落盘 .npz (scipy.sparse.save_npz)
+
+class SparseBruteBackend(IndexBackend):
+    def build(self, vectors):
+        self._sparse_vectors = sp.csr_matrix(...)
+        self._sq_norms = _row_sq_norms(...)
+        if metric == "cosine":
+            self._sparse_vectors = _sparse_row_l2_normalize(...)
+
+    def search(self, query, top_k):
+        dists = (self._sq_norms +
+                 (query**2).sum() -
+                 2 * self._sparse_vectors @ query)
+        ...
+```
+
+**数据模型扩展**
+
+```python
+class Dataset(Base):
+    vector_format: Literal["dense", "sparse"]
+    # alembic 0003: ALTER TABLE...
+    # batch_alter_table 兼容 SQLite
+    # server_default='dense' 自动回填旧数据
+```
+
+**preprocess 新模式**
+
+```bash
+preprocess_h5ad(..., vector_source="raw_sparse")
+# 跳过 PCA, 选 top 5000 HVG
+# → data/processed/{id}/vectors.npz
+```
+
+</div>
+
+→ 工厂注册 `sparse-brute` 后端 + IndexManagePage 选项，6 个 ANN 后端形成完整选型矩阵。
+
+---
+
+<!-- _class: smaller -->
+
+# 8.5 D7 + D4 加分：跨数据集对齐 + LLM Function Calling Agent
+
+<div class="cols">
+
+**D7 跨数据集语义对齐**
+
+```python
+async def align_datasets(session, dataset_ids,
+                          method, target_dim):
+    # 1. 加载每个 dataset 的 h5ad / 元数据
+    # 2. intersect_only: 取基因集交集 →
+    #    在统一空间重新 PCA target_dim 维
+    # 3. harmony (可选): batch correction;
+    #    harmonypy 缺失时降级 intersect_only
+    # 4. 落 data/aligned/{id}/vectors.npy +
+    #    cell_map.json
+    return aligned_dataset_id
+```
+
+`POST /datasets/align` 触发；multi-dataset 检索新增 `aligned_dataset_id` 参数走对齐空间单库路径。
+
+**D4 LLM Function Calling RAG Agent**
+
+```python
+TOOLS = [search_by_cell_id, search_by_vector,
+         list_datasets, filter_cells,
+         summarize_results]
+
+async def chat_with_tools(session, user, query,
+                          session_id, max_iterations=5):
+    messages = [...]
+    while iter < max:
+        resp = llm.chat_with_tools(messages, TOOLS)
+        if resp.tool_calls:
+            for tc in resp.tool_calls:
+                result = TOOL_IMPL[tc.name](**tc.args)
+                messages.append(tool_result)
+        else:
+            return resp.content
+```
+
+4 个 LLM client (mock/openai/dashscope/anthropic) 全部适配；`RagSession / RagMessage` 多轮持久化。
+
+</div>
+
+前端 `RagChatPage` 重构 ChatGPT 风格气泡 + 工具调用状态条 + 引用追溯面板。
+
+---
+
+<!-- _class: smaller -->
+
+# 8.6 v1.2 工程指标 & Pattern B 并行执行复盘
+
+<div class="cols">
+
+**指标对比 (v1.1.0 → v1.2.0)**
+
+| 维度 | v1.1.0 | v1.2.0 | 增量 |
+|---|---:|---:|---|
+| 后端 pytest | 76 | **110** | +34 (+45%) |
+| 前端 vitest | 42 | 42 | 0 |
+| REST 接口 | 31+ | **45+** | +14 |
+| Alembic 迁移 | 1 | **5** | +4 |
+| ANN 后端数 | 5 | **6** | +1 |
+| 累计加分项 | 11 | **17** | +6 |
+| 文档章节 (benchmark) | §5.7 | **§9** | +§7/§8/§9 |
+
+`backend pytest 76→110 +34 个新测试` 覆盖 sweep / subgraph / sparse / alignment / RAG agent 五类新功能。
+
+**Pattern B 并行执行复盘**
+
+```
+M1 (3 subagent 并行)
+ ├ α: C3 backend (sweep service)
+ ├ β: D1 backend (with_params)
+ └ γ: docs (§7 草稿 + PPT 增量)
+
+M2 (2 subagent 并行)
+ ├ α: D2 全栈 (HNSW subgraph)
+ └ β: C5 全栈 (sparse backend)
+
+M3 (2 subagent 并行)
+ ├ α: D7 (alignment)
+ └ β: D4 (RAG tool calling)
+```
+
+**关键经验**
+- 每 subagent 严格在分配的**模块路径**工作 → **零冲突**
+- 共享文件（factory / router / __init__）主代理统一收尾
+- `/loop 5m` 9 次 tick 兜底跑测试/lint，避免 regression 累积
+- 三个 milestone 各打 alpha tag → 便于回滚
+
+</div>
+
+---
+
 <!-- _class: cover center -->
 
 # 总结 Conclusion
 
 **一个完整的端到端 Web 系统**
 
-> 注册 → 上传 → 预处理 → 多后端索引 → 条件检索 → 可视化 → RAG 问答
+> 注册 → 上传 → 预处理 → 多后端索引 → 条件检索 → 可视化 → 参数仪表盘 → HNSW 图 → RAG Agent
 
-**三个加分项全部落地**
+**17 项累计加分（v1.0 三项 + v1.1 八项 + v1.2 六项）**
 
-> 多数据集联合 · 自适应 HNSW · RAG 自然语言
+> 多数据集联合 · 自适应 HNSW · RAG · 8 项 v1.1 perf/feat · 帕累托 · 仪表盘 · HNSW 图 · 稀疏 ANN · 跨数据集对齐 · LLM Function Calling
 
 **实测可量产的性能**
 
-> 微秒级延迟 · 99.96% Recall@10 · 6 万 QPS
+> 微秒级延迟 · 99.96% Recall@10 · 6 万 QPS · 110 个 pytest + 42 个 vitest 全绿
 
 <br>
 

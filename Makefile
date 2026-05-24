@@ -165,9 +165,12 @@ screenshots: ## 重新生成 9 张端到端 UI 实测截图
 demo-video: ## 自动录制带中文配音的演示视频 -> docs/video/demo_final.mp4
 	cd backend && uv run python ../e2e/demo_video.py
 
-slides: ## 重新生成答辩 PPT (PDF + PPTX) by Marp
-	marp docs/slides/answer_defense.md -o docs/slides/answer_defense.pdf --allow-local-files
-	marp docs/slides/answer_defense.md -o docs/slides/answer_defense.pptx --allow-local-files
+slides: ## 重新生成答辩 PPT (PDF + PPTX) by Marp，使用本地 Chrome 避免下载 Chromium
+	@CHROME_BIN=$${CHROME_BIN:-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome}; \
+	marp --no-stdin docs/slides/answer_defense.md -o docs/slides/answer_defense.pdf \
+		--allow-local-files --browser chrome --browser-path "$$CHROME_BIN"; \
+	marp --no-stdin docs/slides/answer_defense.md -o docs/slides/answer_defense.pptx \
+		--allow-local-files --browser chrome --browser-path "$$CHROME_BIN"
 
 benchmark: ## 跑性能基准并自动生成报告
 	cd backend && uv run python scripts/benchmark.py --n 30000 --dim 30 --use-liver
