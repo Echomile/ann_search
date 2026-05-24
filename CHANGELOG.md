@@ -3,6 +3,66 @@
 本项目遵循 [约定式提交 (Conventional Commits)](https://www.conventionalcommits.org/zh-hans/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v1.2.0-alpha.1] - 2026-05-24
+
+v1.1.0 之后的 **M1 性能呈现升级**：6 个语义化 commit（feat 3 / docs 1 / chore 2 / 含 Phase 0 初始化），新增 4 个 REST 接口（3 个 sweep + 1 个 with_params）+ 2 张新表 + 1 个前端 Tab + 1 张 PPT 增量页，全部基于 `feat/v1.2-bonus` 分支。本里程碑覆盖 v1.2 路线图的 6 项加分功能中的前 2 项（C3 帕累托曲线 / D1 交互式仪表盘）。
+
+### 新功能 Features
+
+#### v1.2 加分项 C3 · ANN-Benchmarks 风格 recall-QPS 帕累托曲线
+
+- **feat(eval) M1.C3**：`param_sweep()` 服务 + `SweepRun` / `SweepPoint` ORM + alembic `0002_v1_2_sweep_tables` migration（commit `4529a27`）。
+- 新增 3 个 REST 接口：
+  - `POST /api/v1/evaluation/sweep` 同步触发参数扫描（小规模 <30s 内完成）。
+  - `GET  /api/v1/evaluation/sweep/{id}` 拉取全部数据点（按 recall 升序）。
+  - `GET  /api/v1/evaluation/sweep/{id}/pareto` 仅返回前沿子集。
+- 帕累托标记算法 `_mark_pareto()` 在 (recall, qps) 双目标空间上扫一遍标记，时间复杂度 O(N²)。
+- 默认扫描栅格：hnswlib / faiss-hnsw / adaptive-hnsw 用 `ef_search ∈ {16,32,64,128,256,512}`；faiss-ivfpq 用 `nprobe ∈ {4,8,16,32,64,128}`；brute 单点。
+
+#### v1.2 加分项 D1 · 交互式参数仪表盘后端
+
+- **feat(search) M1.D1**：`POST /api/v1/search/with_params` 端点（commit `f42e2ae`）。
+- 在不重建索引的前提下透传 `runtime_params` 到 backend（hnswlib/faiss-hnsw/adaptive-hnsw 的 `ef_search`、faiss-ivfpq 的 `nprobe`），用 try/finally 保证查询结束后参数恢复，避免污染 IndexCache 给后续普通查询。
+- 响应体回填 `effective_params` + `ignored_params`，便于前端展示生效参数与被忽略的 key。
+
+#### 前端
+
+- **feat(frontend) M1**：`EvaluationPage` 改造为 Tabs 结构，新增「参数扫描 (v1.2)」Tab（commit `85dedc9`）。
+- 新增 `frontend/src/components/evaluation/SweepTab.tsx`（583 行）：触发表单 + recall-QPS 帕累托散点图（按 backend 分组着色 + 前沿大星标 + 虚线连线）+ 散点点击反查 → 滑块联动 + 参数滑块（`ef_search` 8-512 / `nprobe` 1-256）+ 选中点详情面板 + 实时 Top-K 预览（debounce 200ms）。
+- `PlotlyChart` 组件扩展 `onClick` / `onHover` prop 透传 + 对应 TypeScript 类型 export。
+- 新增 `frontend/src/types/evaluation.ts` 中 `SweepRequest / SweepPoint / SweepRun`，`frontend/src/types/search.ts` 中 `SearchWithParamsRequest / SearchResponseWithParams`，`frontend/src/api/evaluation.ts` 中 3 个 sweep 方法，`frontend/src/api/search.ts` 中 `withParams` 方法。
+
+### 文档 Docs
+
+- **docs(benchmark) M1.C3**：`docs/benchmark_report.md` §7 新增「recall-QPS 帕累托曲线分析」章节（占位数据待真实 sweep 跑通后用 regex 批量回填）+ 新增 `docs/slides/v1_2_increment_draft.md` PPT 增量页 Marp markdown 草稿（commit `d8f5ae9`）。
+
+### 工程 Engineering
+
+- **chore(v1.2)** Phase 0：进度追踪 `docs/v1.2_progress.json`（3 milestone × 12 task）+ Loop 状态 `docs/_loop_status.md`（commit `f4d713d`）。
+- **chore(format)**：ruff 自动格式化 6 个无关文件（多行函数签名 / 字符串合并为单行，commit `bd094b1`）。
+- **执行机制**：Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 个 subagent 并行）+ 全程 `/loop 5m` 后台 polish 监督（pytest / vitest / lint 自动回归）。
+
+### 工程指标 (v1.1.0 → v1.2.0-alpha.1)
+
+| 维度 | v1.1.0 | v1.2.0-alpha.1 | 增量 |
+| --- | ---: | ---: | --- |
+| 后端 pytest | 76 | **86** | +10（sweep + with_params 测试） |
+| 前端 vitest | 42 | **42** | 0（SweepTab 单测留 alpha.2 补） |
+| REST 接口 | 31+ | **35+** | +4（3 sweep + 1 with_params） |
+| Alembic 迁移版本 | 1 | **2** | +1（0002 sweep tables） |
+| 前端 Tabs | 0 | **1** | +1（评测 / 参数扫描） |
+| 前端组件 | — | **+SweepTab** | 583 行新组件 |
+
+### M1 后续 polish 待办
+
+- 跑真实 sweep（liver.h5ad PCA 30 维，5 backend × 6 params ≈ 30 数据点）。
+- 用真实数据 regex 回填 `docs/benchmark_report.md` §7 占位（`0.99XX` / `XXXXX`）。
+- 生成 3 张静态 PNG 帕累托曲线图嵌入文档与 PPT。
+- 视频补录 SweepTab 交互演示（30 秒）。
+- 给 SweepTab 写 vitest 单测，目标覆盖触发 / 散点反查 / 滑块联动。
+
+[v1.2.0-alpha.1]: https://github.com/aokimi/ann_search/releases/tag/v1.2.0-alpha.1
+
 ## [v1.1.0] - 2026-05-24
 
 v1.0.0 之后的 **feat + perf + polish 平衡升级**：32 个语义化 commit（feat 15 / test 5 / docs 5 / perf 2 / chore 2 / build 2 / ci 1），新增 8 项功能 / 4 项性能优化 / 4 个 E2E 流程 / 4 张 PPT 演进页 / 3 张关键截图，全部基于 `develop` 分支，向下兼容 v1.0.0 接口。

@@ -3,11 +3,11 @@
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/release-v1.1.0-blue?logo=git" alt="Release"/>
+  <img src="https://img.shields.io/badge/release-v1.2.0--alpha.1-blueviolet?logo=git" alt="Release"/>
   <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI"/>
-  <img src="https://img.shields.io/badge/pytest-76%2F76%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
+  <img src="https://img.shields.io/badge/pytest-86%2F86%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
   <img src="https://img.shields.io/badge/vitest-42%2F42%20passed-brightgreen?logo=vitest" alt="Frontend Tests"/>
-  <img src="https://img.shields.io/badge/REST_API-31%2B-009688?logo=fastapi" alt="API"/>
+  <img src="https://img.shields.io/badge/REST_API-35%2B-009688?logo=fastapi" alt="API"/>
   <img src="https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/FastAPI-0.118%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
   <img src="https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white" alt="React"/>
@@ -199,7 +199,12 @@ cd backend
 uv run arq app.tasks.worker.WorkerSettings
 ```
 
-## 加分功能（v1.0.0 三项 + v1.1.0 八项）
+## 加分功能（v1.0.0 三项 + v1.1.0 八项 + v1.2.0-alpha.1 两项）
+
+### v1.2.0-alpha.1 加分项（M1 性能呈现升级，进行中）
+
+- **C3 · recall-QPS 帕累托曲线**：`POST /api/v1/evaluation/sweep` 同步扫描 backend × ef_search/nprobe 网格，产出 (recall, qps, p50, p95, mem) 数据点，`_mark_pareto()` 标记前沿。前端「参数扫描」Tab 用 Plotly 散点画 ANN-Benchmarks 风格曲线（按 backend 分组着色 + 前沿大星标 + 虚线连线）。
+- **D1 · 交互式参数仪表盘后端**：`POST /api/v1/search/with_params` 在不重建索引的前提下透传 `runtime_params`（`ef_search` / `nprobe`），返回 `effective_params` + `ignored_params`。前端三栏布局：滑块 / 选中点详情 / 实时 Top-K 预览，散点点击反查回滑块。完整路线图与剩余 4 项加分点（D2 HNSW 图可视化 / C5 稀疏感知 ANN / D7 跨数据集对齐 / D4 LLM Function Calling RAG）见 [`docs/v1.2_progress.json`](docs/v1.2_progress.json)。
 
 ### v1.0.0 课程要求加分项（三项全做）
 

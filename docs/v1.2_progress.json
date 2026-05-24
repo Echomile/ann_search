@@ -7,44 +7,49 @@
     {
       "id": "M1",
       "name": "性能呈现升级",
-      "status": "in_progress",
+      "status": "code_complete_pending_release",
       "tag": "v1.2.0-alpha.1",
       "tasks": [
         {
           "id": "M1.C3.backend",
           "owner": "subagent-M1-alpha",
-          "status": "pending",
+          "status": "done",
+          "commit": "4529a27",
           "desc": "evaluation.param_sweep + sweep_run/sweep_point migration + 3 个 sweep REST 接口 + pytest"
         },
         {
           "id": "M1.D1.backend",
           "owner": "subagent-M1-beta",
-          "status": "pending",
+          "status": "done",
+          "commit": "f42e2ae",
           "desc": "POST /search/with_params 透传 runtime_params 接口 + 单测"
         },
         {
           "id": "M1.C3.docs",
           "owner": "subagent-M1-gamma",
-          "status": "pending",
-          "desc": "benchmark_report.md §6 帕累托章节草稿 + PPT 增量页 markdown 草稿"
+          "status": "done",
+          "commit": "d8f5ae9",
+          "desc": "benchmark_report.md §7 帕累托章节草稿（占位）+ PPT 增量页 markdown 草稿"
         },
         {
           "id": "M1.C3.frontend",
           "owner": "main-agent",
-          "status": "pending",
+          "status": "done",
+          "commit": "85dedc9",
           "desc": "EvaluationPage 新增「参数扫描」Tab + Plotly recall-QPS 散点 + 帕累托前沿"
         },
         {
           "id": "M1.D1.frontend",
           "owner": "main-agent",
-          "status": "pending",
+          "status": "done",
+          "commit": "85dedc9",
           "desc": "参数扫描 Tab 内嵌交互层（滑块 + 散点反查 + 右侧实时 Top-K）"
         },
         {
           "id": "M1.release",
           "owner": "main-agent",
-          "status": "pending",
-          "desc": "CHANGELOG + README + progress_summary 更新, 打 v1.2.0-alpha.1"
+          "status": "in_progress",
+          "desc": "alembic upgrade head + 真实 sweep 数据回填 §7 + CHANGELOG + README, 打 v1.2.0-alpha.1"
         }
       ]
     },
