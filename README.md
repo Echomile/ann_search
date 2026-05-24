@@ -3,10 +3,10 @@
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/release-v1.2.0-success?logo=git" alt="Release"/>
+  <img src="https://img.shields.io/badge/release-v1.2.1-success?logo=git" alt="Release"/>
   <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI"/>
   <img src="https://img.shields.io/badge/pytest-110%2F110%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
-  <img src="https://img.shields.io/badge/vitest-42%2F42%20passed-brightgreen?logo=vitest" alt="Frontend Tests"/>
+  <img src="https://img.shields.io/badge/vitest-56%2F56%20passed-brightgreen?logo=vitest" alt="Frontend Tests"/>
   <img src="https://img.shields.io/badge/REST_API-45%2B-009688?logo=fastapi" alt="API"/>
   <img src="https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/FastAPI-0.118%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>

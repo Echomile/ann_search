@@ -3,6 +3,45 @@
 本项目遵循 [约定式提交 (Conventional Commits)](https://www.conventionalcommits.org/zh-hans/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v1.2.1] - 2026-05-24
+
+v1.2.0 之后的 **polish patch**：把 v1.2.0 release 中标记为"可选"的 4 项 polish 待办全部落地，无破坏性改动，所有现有接口与 schema 保持不变。
+
+### 文档与可视化 Docs / Viz
+
+- **polish(d7) §9 真实数据回填**（commit `e7bb21a`）：把 D7 跨数据集对齐章节从占位升级为真实 3-way split 数据实测。新增 `backend/scripts/alignment_offline.py` 离线对比脚本 + `backend/scripts/alignment_plot.py` 3 子图 PNG 导出器；用 `liver.h5ad` PCA 30D N=69032 切 3-way split 100 queries 实测：
+  - baseline (各自 hnswlib + min-max)：recall@10 = **0.471**, QPS = **7 690**, p50 = **0.122 ms**
+  - **intersect_only (统一 PCA + 单库 hnswlib)：recall@10 = 1.000, QPS = 24 970, p50 = 0.037 ms**
+  - 对齐路径相对 baseline：recall +52.9 pp / QPS ×3.2 / p50 ×3.3 faster
+  - 原始 JSON: `docs/alignment_offline_3way.json` · 对比图：`docs/assets/benchmark/alignment_3way.png`
+- **docs(slides) v1.2 演进 6 张专题页**（commit `75623f0`）：PPT 25 张 → **31 张**，新增 8.1-8.6 覆盖 6 项加分功能 + 工程指标对比 + Pattern B 并行执行复盘。PDF 1.8 → 2.0 MB / PPTX 5.8 → 7.5 MB。
+- **Makefile slides target 修复**：加 `--no-stdin`（避免 marp 卡在 stdin wait）+ `--browser chrome --browser-path` 指向本地 Google Chrome（避免下载几百 MB chromium）。
+
+### 测试 Tests
+
+- **test(frontend) 三大组件 vitest 单测**（commit `b6441b2`）：把前端 vitest 覆盖从 utils/store/hooks 层扩展到 page/components 层，**+14 用例（42 → 56 passed）**：
+  - `SweepTab.test.tsx` 6 用例：初始渲染 + Empty / triggerSweep / Plotly trace 数量 / 散点 onClick 反查 / debounce 200ms with_params / brute ignored_params
+  - `IndexGraphPage.test.tsx` 4 用例：表单 / hnswlib fetchSubgraph / 非 HNSW backend disabled / 节点边 trace
+  - `RagChatPage.test.tsx` 4 用例：气泡 + 输入 / 发送 chatQuery / 引用 Collapse 展开后 tag 内容 / 多轮历史 + tool_trace 展开
+  - 集中 mock 在 `frontend/src/test-utils/setup.ts`：PlotlyChart 简化为 `data-testid="plotly-chart"` + onClick 透传, 各 API 模块 `vi.mock` 替换 axios 调用
+
+### 修复 Bug Fixes
+
+- **fix(sweep-tab) initialValues**（commit `b6441b2` 同 commit）：`SweepTab.tsx` 把 Select `defaultValue={SWEEPABLE_BACKENDS.map(...)}` 改为 Form `initialValues.backends`（antd 受控 Field 不支持 defaultValue, 之前控件警告 `defaultValue will not work on controlled Field`；改进后 `form.validateFields` 正确读到默认 5 个 backend）。
+
+### v1.2.1 工程指标
+
+| 维度 | v1.2.0 | v1.2.1 | 增量 |
+| --- | ---: | ---: | --- |
+| 后端 pytest | 110 | 110 | 0 |
+| **前端 vitest** | 42 | **56** | **+14** (SweepTab/IndexGraph/RagChat 三组件单测) |
+| Test Files | 6 | **9** | +3 |
+| **PPT slides** | 25 | **31** | +6 (v1.2 演进 6 张专题页) |
+| benchmark §9 状态 | 占位 | **真实 3-way 数据 + PNG** | 完整 |
+| Makefile slides | 卡死 (stdin/chromium) | **工作正常** (本地 Chrome) | bug fix |
+
+[v1.2.1]: https://github.com/aokimi/ann_search/releases/tag/v1.2.1
+
 ## [v1.2.0] - 2026-05-24
 
 v1.2.0 正式版本：**v1.1.0 之后的 v1.2 路线图 6 项加分功能全部交付**（C3 + D1 + D2 + C5 + D7 + D4），分 M1 / M2 / M3 三个 milestone 推进；总计 9 个语义化 commit（含 4 个 feat / 1 fix / 2 feat-scripts / 2 docs-release），通过 Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 个 subagent 并行）+ 全程 `/loop 5m` 后台 polish 监督。
