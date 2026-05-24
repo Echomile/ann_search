@@ -8,20 +8,29 @@ math: mathjax
 header: '单细胞 ANN 检索系统'
 footer: '软件工程大作业 · 2026'
 style: |
-  section { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 26px; }
-  h1 { color: #1677ff; font-size: 1.6em; }
-  h2 { color: #1677ff; font-size: 1.25em; }
-  h3 { color: #444; }
+  section { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 24px; padding: 44px 56px 64px; }
+  section footer { color: #aaa; font-size: 0.7em; }
+  section header { color: #aaa; font-size: 0.7em; }
+  section h1 { color: #1677ff; font-size: 1.55em; margin: 0 0 12px; }
+  section h2 { color: #1677ff; font-size: 1.2em; margin: 16px 0 8px; }
+  h3 { color: #444; margin: 12px 0 6px; }
+  p, ul, ol { margin: 8px 0; }
   code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
-  pre { background: #f7f7f9; border-radius: 6px; padding: 12px; font-size: 0.78em; line-height: 1.35; }
-  table { font-size: 0.78em; border-collapse: collapse; }
+  pre { background: #f7f7f9; border-radius: 6px; padding: 10px 12px; font-size: 0.72em; line-height: 1.3; margin: 8px 0; }
+  table { font-size: 0.76em; border-collapse: collapse; margin: 6px 0; }
   th { background: #f0f5ff; color: #1677ff; }
-  th, td { padding: 4px 10px; border: 1px solid #e0e0e0; }
-  section.smaller { font-size: 22px; }
+  th, td { padding: 3px 8px; border: 1px solid #e0e0e0; }
+  section.smaller { font-size: 20px; }
+  section.smaller pre { font-size: 0.68em; line-height: 1.25; }
+  section.smaller table { font-size: 0.72em; }
+  section.smaller th, section.smaller td { padding: 2px 6px; }
+  section.tiny { font-size: 17px; }
+  section.tiny pre { font-size: 0.64em; line-height: 1.2; }
+  section.tiny table { font-size: 0.7em; }
   section.cover { background: linear-gradient(135deg, #e6f4ff 0%, #ffffff 100%); }
   section.cover h1 { font-size: 2.2em; }
   section.center { text-align: center; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
   .badge { display: inline-block; background: #1677ff; color: white; padding: 2px 10px; border-radius: 12px; font-size: 0.7em; margin-right: 6px; }
   .muted { color: #888; font-size: 0.85em; }
 ---
@@ -42,7 +51,8 @@ style: |
 
 <br>
 
-团队 _XXX_ · 2026 年 5 月
+**团队**：彭振皓 · 廖望  
+**2026 年 6 月 8 日**
 
 ---
 
@@ -126,6 +136,8 @@ style: |
 
 ---
 
+<!-- _class: smaller -->
+
 # 3.1 技术栈 Tech Stack
 
 | 层 | 选型 | 用途 |
@@ -142,6 +154,8 @@ style: |
 | 包管理 | uv (后端) · pnpm (前端) | 快速可复现安装 |
 
 ---
+
+<!-- _class: smaller -->
 
 # 3.2 ANN 引擎抽象 IndexBackend
 
@@ -170,46 +184,69 @@ IndexBackend (ABC)
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 4. 核心代码：抽象 + 自适应 ef
+
+<div class="cols">
+<div>
 
 **IndexBackend 抽象**
 
 ```python
 class IndexBackend(ABC):
-    @property
     @abstractmethod
     def name(self) -> str: ...
+
     @abstractmethod
-    def build(self, vectors: np.ndarray, **params) -> None: ...
+    def build(self, vectors, **params): ...
+
     @abstractmethod
-    def search(self, query: np.ndarray, top_k: int) -> tuple[np.ndarray, np.ndarray]: ...
+    def search(self, query, top_k
+        ) -> tuple[np.ndarray, np.ndarray]:
+        ...
+
     @abstractmethod
-    def save(self, path: str) -> None: ...
+    def save(self, path) -> None: ...
     @abstractmethod
-    def load(self, path: str) -> None: ...
+    def load(self, path) -> None: ...
     @abstractmethod
     def memory_mb(self) -> float: ...
 ```
 
-**自适应 HNSW 核心循环（节选）**
+`create_backend()` 工厂 + `IndexCache` LRU
+→ 路由层无需感知 5 种后端差异。
+
+</div>
+<div>
+
+**自适应 HNSW 核心循环**
 
 ```python
 while pending.size > 0:
-    self._index.set_ef(int(max(ef, k_query)))
-    labels, dists = self._index.knn_query(q[pending], k=k_query)
-    if retry == 0:  # 首轮：相对距离间隔早停
-        gap = (dists[:, k] - dists[:, k-1]) / (dists[:, k-1] - dists[:, 0] + eps)
+    self._index.set_ef(max(ef, k_query))
+    labels, dists = self._index.knn_query(
+        q[pending], k=k_query)
+
+    if retry == 0:  # 首轮：相对距离间隔
+        gap = ((dists[:, k] - dists[:, k-1])
+            / (dists[:, k-1] - dists[:, 0] + eps))
         stable = gap >= self.gap_threshold
-    else:           # 后续轮：top-k 集合重合度
-        overlap = self._overlap_against(prev_top_k, labels[:, :k], pending)
+    else:           # 后续：top-k 集合重合度
+        overlap = self._overlap_against(
+            prev_top_k, labels[:, :k], pending)
         stable = overlap >= self.overlap_threshold
-    pending = pending[~stable]   # 仅对未稳定 query 升档重查
+
+    pending = pending[~stable]
     ef = min(ef * 2, self.max_ef)
 ```
 
+</div>
+</div>
+
 ---
+
+<!-- _class: tiny -->
 
 # 4.1 数据模型 ER
 
@@ -300,6 +337,8 @@ for i, item in enumerate(final, start=1):
 
 ---
 
+<!-- _class: tiny -->
+
 # 5. 加分项 ②：自适应 HNSW
 
 **动机**：固定 `ef_search` 在 query 难度分布不均时浪费算力 / 召回不足。
@@ -362,6 +401,8 @@ hits: [{cell_id, distance, meta}, ...]
 
 ---
 
+<!-- _class: tiny -->
+
 # 6. 实测数据：liver.h5ad
 
 **数据集**：CZI 儿童肝脏 scRNA-seq，**69 032 细胞 × 30 维 PCA**（基准 N=30 000）
@@ -413,6 +454,8 @@ hits: [{cell_id, distance, meta}, ...]
 **Playwright E2E** 一键复现：登录 → 上传 → 预处理 → 构建索引 → 检索 → 评测 → RAG（10 张实测截图）
 
 ---
+
+<!-- _class: smaller -->
 
 <!-- _class: smaller -->
 
@@ -468,6 +511,8 @@ hits: [{cell_id, distance, meta}, ...]
 
 ---
 
+<!-- _class: smaller -->
+
 # 6.3 项目交付清单
 
 **代码仓库**（GitHub）
@@ -511,7 +556,7 @@ hits: [{cell_id, distance, meta}, ...]
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 7.2 双层缓存：IndexCache + Redis SearchCache
 
@@ -549,7 +594,7 @@ TTL = settings.SEARCH_CACHE_TTL_SECONDS  # 默认 300s
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 7.3 算法 / 数据加速：mmap + float16 + numba
 
@@ -661,7 +706,7 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 8.2 C3 加分：recall-QPS 帕累托曲线（ANN-Benchmarks 风格）
 
@@ -698,9 +743,15 @@ async def param_sweep(session, dataset_id,
 
 </div>
 
-![Pareto Curve](../assets/benchmark/pareto_pca30.png)
-
 → 完整 25 数据点 + 5 帕累托前沿见 `docs/sweep_real_liver_pca30.json` + `docs/benchmark_report.md` §7。
+
+---
+
+<!-- _class: center -->
+
+# 8.2.1 帕累托曲线静态图 (liver PCA 30D 真实数据)
+
+<img src="../assets/benchmark/pareto_pca30.png" style="max-height:520px; width:auto;" alt="Pareto Curve" />
 
 ---
 
@@ -802,7 +853,7 @@ preprocess_h5ad(..., vector_source="raw_sparse")
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 8.5 D7 + D4 加分：跨数据集对齐 + LLM Function Calling Agent
 
@@ -853,11 +904,12 @@ async def chat_with_tools(session, user, query,
 
 ---
 
-<!-- _class: smaller -->
+<!-- _class: tiny -->
 
 # 8.6 v1.2 工程指标 & Pattern B 并行执行复盘
 
 <div class="cols">
+<div>
 
 **指标对比 (v1.1.0 → v1.2.0)**
 
@@ -869,9 +921,12 @@ async def chat_with_tools(session, user, query,
 | Alembic 迁移 | 1 | **5** | +4 |
 | ANN 后端数 | 5 | **6** | +1 |
 | 累计加分项 | 11 | **17** | +6 |
-| 文档章节 (benchmark) | §5.7 | **§9** | +§7/§8/§9 |
+| benchmark 章节 | §5.7 | **§9** | +§7/§8/§9 |
 
-`backend pytest 76→110 +34 个新测试` 覆盖 sweep / subgraph / sparse / alignment / RAG agent 五类新功能。
+`pytest 76→110 +34 个新测试` 覆盖 sweep / subgraph / sparse / alignment / RAG agent 五类新功能。
+
+</div>
+<div>
 
 **Pattern B 并行执行复盘**
 
@@ -879,7 +934,7 @@ async def chat_with_tools(session, user, query,
 M1 (3 subagent 并行)
  ├ α: C3 backend (sweep service)
  ├ β: D1 backend (with_params)
- └ γ: docs (§7 草稿 + PPT 增量)
+ └ γ: docs (§7 + PPT 增量)
 
 M2 (2 subagent 并行)
  ├ α: D2 全栈 (HNSW subgraph)
@@ -891,11 +946,13 @@ M3 (2 subagent 并行)
 ```
 
 **关键经验**
-- 每 subagent 严格在分配的**模块路径**工作 → **零冲突**
-- 共享文件（factory / router / __init__）主代理统一收尾
-- `/loop 5m` 9 次 tick 兜底跑测试/lint，避免 regression 累积
+
+- 每 subagent 严格在分配模块路径 → **零冲突**
+- 共享文件主代理统一收尾
+- `/loop 5m` 9 tick 兜底跑测试 + lint
 - 三个 milestone 各打 alpha tag → 便于回滚
 
+</div>
 </div>
 
 ---
