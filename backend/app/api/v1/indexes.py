@@ -27,6 +27,8 @@ from app.schemas.index import (
     IndexRecordOut,
     IndexStatus,
 )
+from app.schemas.subgraph import SubgraphEdge, SubgraphNode, SubgraphResponse
+from app.services import search as search_service
 from app.services.ann.cache import IndexCache
 from app.tasks.index_task import enqueue_build_index
 
@@ -314,3 +316,175 @@ async def delete_index(
             os.remove(path)
 
     return Message(detail=f"索引 {index_id} 已删除")
+
+
+_SUPPORTED_SUBGRAPH_BACKENDS = {"hnswlib", "adaptive-hnsw"}
+
+
+@router.get(
+    "/indexes/{index_id}/subgraph",
+    response_model=SubgraphResponse,
+    summary="HNSW 邻居子图",
+    description=(
+        "返回 HNSW 索引在指定 cell 周围的局部邻居图，用于 v1.2 D2 加分项的"
+        " 小世界图可视化。\n\n"
+        "仅 ``hnswlib`` 与 ``adaptive-hnsw`` 后端支持；其他后端返回"
+        " ``400 该后端不暴露图结构``。\n\n"
+        "Query 参数：\n"
+        "- ``cell_id`` (必填)：查询起点 cell_id，会通过数据集 ``cell_ids`` 映射到 hnswlib label；\n"
+        "- ``depth`` (默认 ``2``，范围 ``1-3``)：BFS 深度；\n"
+        "- ``layer`` (默认 ``0``，范围 ``0-N``)：HNSW 层，0 是底层最稠密；\n"
+        "- ``max_nodes`` (默认 ``200``，范围 ``10-500``)：安全上限，防高 depth 爆炸；"
+        "命中上限会把响应 ``truncated`` 置为 ``true``。\n\n"
+        "实现兼容性：若运行时 hnswlib 不暴露 ``get_neighbors_list`` 邻接表 API，"
+        "后端会回退到基于 ``knn_query`` 的 Top-M 近邻图近似（仅用于可视化，"
+        "拓扑量级与真实 HNSW 一致但边集不完全相同）。"
+    ),
+)
+async def get_index_subgraph(
+    index_id: int,
+    current_user: CurrentUser,
+    db: DbSession,
+    cell_id: str,
+    depth: int = 2,
+    layer: int = 0,
+    max_nodes: int = 200,
+) -> SubgraphResponse:
+    """返回 HNSW 索引在指定 cell 周围的局部邻居子图（D2 加分项）。
+
+    Args:
+        index_id: 索引 ID。
+        current_user: 当前登录用户（鉴权 + 所有权校验）。
+        db: 异步数据库会话。
+        cell_id: 查询起点 cell_id。
+        depth: BFS 深度，``1-3``。
+        layer: HNSW 层。
+        max_nodes: 节点数上限。
+
+    Returns:
+        SubgraphResponse: 子图节点 / 边 / 元数据。
+
+    Raises:
+        HTTPException: 索引不存在 / 非 HNSW 系后端 / cell_id 找不到 / 参数非法。
+    """
+    if not 1 <= depth <= 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"depth 应在 [1, 3]，收到 {depth}",
+        )
+    if layer < 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"layer 应 >= 0，收到 {layer}",
+        )
+    if not 10 <= max_nodes <= 500:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"max_nodes 应在 [10, 500]，收到 {max_nodes}",
+        )
+
+    record, dataset = await _get_owned_index(db, index_id, current_user.id)
+    if record.backend not in _SUPPORTED_SUBGRAPH_BACKENDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"该后端不暴露图结构: backend={record.backend}",
+        )
+    if record.status != "ready":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"索引尚未 ready: {record.status}",
+        )
+
+    # 解析 dataset_dir（兼容 vectors_path 既可指文件也可指目录）
+    if not dataset.vectors_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"数据集 {dataset.id} 缺少预处理向量路径",
+        )
+    vp = dataset.vectors_path
+    dataset_dir = vp if os.path.isdir(vp) else (os.path.dirname(vp) or vp)
+
+    # 拿到后端实例与 cell_ids 映射
+    try:
+        backend = search_service.get_index_backend(
+            index_id=record.id,
+            dataset_dir=dataset_dir,
+            backend_name=record.backend,
+            metric=record.metric,
+            dim=dataset.vector_dim,
+            index_path=record.index_path,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"加载索引后端失败: {exc}",
+        ) from exc
+
+    artifacts = search_service.load_dataset_artifacts(dataset_dir)
+    cell_ids: list[str] = artifacts["cell_ids"]
+    cid_map: dict[str, int] = artifacts["cell_id_to_index"]
+    if cell_id not in cid_map:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"cell_id 不存在: {cell_id}",
+        )
+    entry_label = int(cid_map[cell_id])
+
+    metadata = artifacts.get("metadata")
+    cell_type_col = (
+        metadata["cell_type"]
+        if metadata is not None and "cell_type" in getattr(metadata, "columns", [])
+        else None
+    )
+
+    try:
+        raw = backend.get_local_subgraph(
+            entry_label=entry_label,
+            depth=int(depth),
+            layer=int(layer),
+            max_nodes=int(max_nodes),
+        )
+    except AttributeError as exc:
+        # 后端未实现该接口（理论上 _SUPPORTED_SUBGRAPH_BACKENDS 已拦截，此处兜底）
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"该后端不暴露图结构: {exc}",
+        ) from exc
+    except IndexError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+
+    nodes_out: list[SubgraphNode] = []
+    for item in raw["nodes"]:
+        label = int(item["id"])
+        if label < 0 or label >= len(cell_ids):
+            continue
+        cid = cell_ids[label]
+        ctype: str | None = None
+        if cell_type_col is not None:
+            v = cell_type_col.iloc[label]
+            if v is not None and not (isinstance(v, float) and v != v):  # 非 NaN
+                ctype = str(v)
+        nodes_out.append(
+            SubgraphNode(
+                label=label,
+                cell_id=cid,
+                depth=int(item["depth"]),
+                is_entry=(label == entry_label),
+                is_topk=False,
+                cell_type=ctype,
+            )
+        )
+    edges_out = [SubgraphEdge(src=int(e["src"]), dst=int(e["dst"])) for e in raw["edges"]]
+
+    return SubgraphResponse(
+        nodes=nodes_out,
+        edges=edges_out,
+        entry_label=entry_label,
+        entry_cell_id=cell_id,
+        layer=int(raw["layer"]),
+        depth=int(raw["depth"]),
+        truncated=bool(raw["truncated"]),
+        backend=record.backend,
+    )

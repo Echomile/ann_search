@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -146,3 +147,139 @@ class HnswlibBackend(IndexBackend):
         vec_bytes = self._num_elements * self.dim * 4
         graph_bytes = self._num_elements * self._m * 8
         return float((vec_bytes + graph_bytes) / (1024 * 1024))
+
+    def _get_layer_neighbors(self, label: int, layer: int) -> list[int]:
+        """获取节点 ``label`` 在指定层的邻居列表。
+
+        实现策略（按优先级 fallback）：
+            1. **真实 HNSW 邻接表**：若运行时 ``hnswlib.Index`` 暴露
+               ``get_neighbors_list(layer=...)``（hnswlib 主干 >=0.8 路线图中的特性）
+               则按 ``label`` 查表返回真实邻接。
+            2. **kNN 近邻近似**：若 API 不可用（典型如发行版 0.8.0），用底层向量
+               跑一次 ``knn_query(self_vector, k=M+1)`` 取除自身外的 Top-M 个候选，
+               近似 layer-0 邻接关系；该回退仅供 D2 邻居图可视化使用，
+               与真实 HNSW 内部边集存在差异但拓扑量级一致。
+
+        Args:
+            label: 节点 label（与 :meth:`build` 时 ``add_items`` 的 id 对齐）。
+            layer: HNSW 层；非 0 层在 fallback 模式下统一退化为 layer-0 近邻。
+
+        Returns:
+            list[int]: 邻居 label 列表（不含 ``label`` 自身）。
+
+        Raises:
+            RuntimeError: 索引尚未构建或加载。
+        """
+        if self._index is None:
+            raise RuntimeError("索引尚未构建或加载")
+
+        get_neighbors = getattr(self._index, "get_neighbors_list", None)
+        if callable(get_neighbors):
+            adjacency = get_neighbors(layer=int(layer))
+            if label < 0 or label >= len(adjacency):
+                return []
+            return [int(n) for n in adjacency[label] if int(n) != int(label)]
+
+        # Fallback: 用 knn_query 近似 layer-0 邻居（高层在 fallback 下与 0 层同语义）
+        try:
+            self_vec = np.asarray(self._index.get_items([int(label)]), dtype=np.float32)
+        except Exception as exc:  # noqa: BLE001
+            raise IndexError(f"label {label} 不在索引中") from exc
+        if self_vec.size == 0:
+            raise IndexError(f"label {label} 不在索引中")
+        # 取 M+1 个：去掉自身后约等于真实 layer-0 邻居规模
+        k = min(self._m + 1, self._num_elements)
+        prev_ef = self._ef_search
+        # 提升 ef 保证邻居查询稳定；查询完恢复原值
+        self._index.set_ef(max(prev_ef, k * 2))
+        try:
+            labels, _ = self._index.knn_query(self_vec, k=k)
+        finally:
+            self._index.set_ef(prev_ef)
+        neighbors = [int(x) for x in np.asarray(labels)[0] if int(x) != int(label)]
+        return neighbors
+
+    def get_local_subgraph(
+        self,
+        entry_label: int,
+        depth: int = 2,
+        layer: int = 0,
+        max_nodes: int = 200,
+    ) -> dict[str, Any]:
+        """从 ``entry_label`` 出发做 BFS, 返回 depth 跳内的局部子图。
+
+        BFS 规则：
+            - 从 ``entry_label`` 出发逐层扩展，记录已访问节点 + 深度；
+            - 仅当 ``depth_visited[src] < depth`` 时把 ``(src, dst)`` 加入边集，
+              避免外圈 ring 节点之间的边把可视化变成一团毛球；
+            - 触发 ``max_nodes`` 上限后停止扩张，并把 ``truncated`` 置为 ``True``。
+
+        Args:
+            entry_label: 起点节点 label（即 hnswlib 内部 index，与 ``build`` 时
+                ``add_items`` 的 ids 对齐）。
+            depth: BFS 深度，常见取值 1/2/3。
+            layer: HNSW 层，0 = 底层全连接，越高层越稀疏。
+            max_nodes: 安全上限，避免高 depth 爆炸。
+
+        Returns:
+            dict[str, Any]: 形如
+                ``{"nodes": [{"id": int, "depth": int}, ...],
+                "edges": [{"src": int, "dst": int}, ...],
+                "entry": entry_label, "layer": layer, "depth": depth,
+                "truncated": bool}``。
+
+        Raises:
+            RuntimeError: 索引尚未构建。
+            IndexError: ``entry_label`` 不在索引中。
+            ValueError: ``depth`` / ``max_nodes`` 非法。
+        """
+        if self._index is None:
+            raise RuntimeError("索引尚未构建或加载")
+        if depth < 1:
+            raise ValueError(f"depth 必须 >= 1: {depth}")
+        if max_nodes < 1:
+            raise ValueError(f"max_nodes 必须 >= 1: {max_nodes}")
+        entry = int(entry_label)
+        if entry < 0 or entry >= self._num_elements:
+            raise IndexError(f"entry_label {entry} 不在索引中")
+
+        # BFS：visited 同时承担「已加入 nodes」与「记录深度」两个职责
+        visited: dict[int, int] = {entry: 0}
+        edge_set: set[tuple[int, int]] = set()
+        queue: deque[int] = deque([entry])
+        truncated = False
+
+        while queue:
+            src = queue.popleft()
+            src_depth = visited[src]
+            if src_depth >= depth:
+                # 外圈节点只作为终点接收边，不再向外扩张
+                continue
+            try:
+                neighbors = self._get_layer_neighbors(src, layer)
+            except IndexError:
+                # 某些 label 可能在 fallback 路径下取不到向量，跳过即可
+                continue
+            for dst in neighbors:
+                if dst not in visited:
+                    if len(visited) >= max_nodes:
+                        truncated = True
+                        break
+                    visited[dst] = src_depth + 1
+                    queue.append(dst)
+                # 边只在 src_depth < depth 时加入：保留 BFS 树 + 同深度横向边
+                edge = (src, dst) if src <= dst else (dst, src)
+                edge_set.add(edge)
+            if truncated:
+                break
+
+        nodes = [{"id": label, "depth": d} for label, d in visited.items()]
+        edges = [{"src": s, "dst": d} for s, d in edge_set]
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "entry": entry,
+            "layer": int(layer),
+            "depth": int(depth),
+            "truncated": truncated,
+        }

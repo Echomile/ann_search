@@ -1,6 +1,12 @@
 // ANN 索引记录相关类型，命名与后端 schema 保持一致
 
-export type IndexBackend = 'hnswlib' | 'faiss-hnsw' | 'faiss-ivfpq' | 'brute';
+export type IndexBackend =
+  | 'hnswlib'
+  | 'faiss-hnsw'
+  | 'faiss-ivfpq'
+  | 'brute'
+  | 'adaptive-hnsw'
+  | 'sparse-brute';
 export type DistanceMetric = 'l2' | 'cosine' | 'ip';
 export type IndexStatusName = 'building' | 'ready' | 'failed';
 

@@ -15,6 +15,7 @@ import AdminUsersPage from '@/pages/AdminUsersPage';
 // 重 Plotly 依赖的页面单独懒加载，避免拖慢首屏
 const VisualizationPage = lazy(() => import('@/pages/VisualizationPage'));
 const EvaluationPage = lazy(() => import('@/pages/EvaluationPage'));
+const IndexGraphPage = lazy(() => import('@/pages/IndexGraphPage'));
 
 const withSuspense = (node: JSX.Element) => (
   <Suspense fallback={<LoadingSpinner />}>{node}</Suspense>
@@ -35,7 +36,9 @@ export const router = createBrowserRouter([
       { index: true, element: <Navigate to="/datasets" replace /> },
       { path: 'datasets', element: <DatasetsPage /> },
       { path: 'indexes', element: <IndexManagePage /> },
+      { path: 'indexes/graph', element: withSuspense(<IndexGraphPage />) },
       { path: 'indexes/:id', element: <IndexDetailPage /> },
+      { path: 'indexes/:id/graph', element: withSuspense(<IndexGraphPage />) },
       { path: 'search', element: <SearchPage /> },
       { path: 'visualization', element: withSuspense(<VisualizationPage />) },
       { path: 'evaluation', element: withSuspense(<EvaluationPage />) },

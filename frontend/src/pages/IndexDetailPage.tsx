@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
+  ApartmentOutlined,
   CheckCircleOutlined,
   DashboardOutlined,
   DeleteOutlined,
@@ -92,6 +93,11 @@ const IndexDetailPage = () => {
     if (!record) return;
     if (record.status === 'ready') setCurrentIndex(record);
     navigate(`/search?index_id=${record.id}`);
+  };
+
+  const handleGoGraph = () => {
+    if (!record) return;
+    navigate(`/indexes/${record.id}/graph`);
   };
 
   const handleGoEvaluation = () => {
@@ -209,6 +215,16 @@ const IndexDetailPage = () => {
           </Button>
           <Button icon={<DashboardOutlined />} onClick={handleGoEvaluation} disabled={!isReady}>
             跑评测
+          </Button>
+          <Button
+            icon={<ApartmentOutlined />}
+            onClick={handleGoGraph}
+            disabled={
+              !isReady ||
+              !(['hnswlib', 'adaptive-hnsw'] as readonly string[]).includes(record.backend)
+            }
+          >
+            查看邻居图
           </Button>
           <Button
             type={currentIndex?.id === record.id ? 'primary' : 'default'}

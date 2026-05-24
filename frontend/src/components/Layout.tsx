@@ -18,6 +18,7 @@ import {
   SearchOutlined,
   DotChartOutlined,
   DashboardOutlined,
+  ApartmentOutlined,
   MessageOutlined,
   UserOutlined,
   LogoutOutlined,
@@ -41,6 +42,7 @@ const BASE_MENU_ITEMS: MenuItem[] = [
   { key: '/search', label: '检索', icon: <SearchOutlined /> },
   { key: '/visualization', label: '可视化', icon: <DotChartOutlined /> },
   { key: '/evaluation', label: '性能评测', icon: <DashboardOutlined /> },
+  { key: '/indexes/graph', label: '索引图谱', icon: <ApartmentOutlined /> },
   { key: '/rag', label: 'RAG', icon: <MessageOutlined /> },
 ];
 
@@ -68,8 +70,11 @@ const Layout = () => {
   );
 
   const selectedKey = useMemo(() => {
-    const match = menuItems.find((item) => location.pathname.startsWith(item.key));
-    return match ? match.key : '/datasets';
+    // 优先最长前缀匹配：避免 /indexes/graph 落在 /indexes 上而错失高亮
+    const matches = menuItems
+      .filter((item) => location.pathname.startsWith(item.key))
+      .sort((a, b) => b.key.length - a.key.length);
+    return matches[0]?.key ?? '/datasets';
   }, [location.pathname, menuItems]);
 
   const handleLogout = () => {

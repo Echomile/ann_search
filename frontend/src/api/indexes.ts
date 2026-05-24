@@ -5,6 +5,7 @@ import type {
   IndexRecord,
   IndexStatus,
 } from '@/types/indexRecord';
+import type { SubgraphQuery, SubgraphResponse } from '@/types/subgraph';
 
 // 索引管理 API
 export const indexesApi = {
@@ -33,5 +34,18 @@ export const indexesApi = {
 
   remove: async (id: number): Promise<void> => {
     await httpClient.delete(`/indexes/${id}`);
+  },
+
+  // D2 加分项：拉取 HNSW 索引在 cell 周围的局部邻居子图（用于可视化）
+  getSubgraph: async (id: number, query: SubgraphQuery): Promise<SubgraphResponse> => {
+    const { data } = await httpClient.get<SubgraphResponse>(`/indexes/${id}/subgraph`, {
+      params: {
+        cell_id: query.cell_id,
+        depth: query.depth,
+        layer: query.layer,
+        max_nodes: query.max_nodes,
+      },
+    });
+    return data;
   },
 };
