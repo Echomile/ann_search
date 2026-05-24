@@ -40,6 +40,13 @@ class MultiDatasetSearchRequest(BaseModel):
     """
 
     dataset_ids: list[int] = Field(..., min_length=1, description="参与检索的数据集 ID 列表")
+    aligned_dataset_id: int | None = Field(
+        None,
+        description=(
+            "对齐数据集 ID (v1.2 D7)。提供时走对齐空间单库检索路径，``dataset_ids`` "
+            "仅做审计标记；缺省时保持现有「各自查 + min-max」兼容路径"
+        ),
+    )
     index_ids: list[int] | None = Field(
         None,
         description="与 ``dataset_ids`` 一一对应的索引 ID 列表；为 ``None`` 时每个数据集自动取最新 ready 索引",
@@ -78,6 +85,13 @@ class SearchResponse(BaseModel):
     metric: str | None = Field(None, description="距离度量")
     total_candidates: int | None = Field(None, description="参与排序的候选数量")
     hits: list[SearchHit] = Field(default_factory=list, description="命中结果列表")
+    aligned_dataset_id: int | None = Field(
+        None,
+        description=(
+            "对齐数据集 ID (v1.2 D7)，仅在跨数据集检索且通过 aligned 路径时回填；"
+            "前端据此标识结果来自统一向量空间"
+        ),
+    )
 
 
 class BatchQueryItem(BaseModel):

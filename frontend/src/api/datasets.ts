@@ -8,6 +8,11 @@ import type {
   UmapResponse,
   UploadProgressResponse,
 } from '@/types/dataset';
+import type {
+  AlignedDataset,
+  AlignedDatasetDeleteResponse,
+  AlignRequest,
+} from '@/types/aligned';
 
 interface UploadOptions {
   onUploadProgress?: (event: AxiosProgressEvent) => void;
@@ -72,6 +77,35 @@ export const datasetsApi = {
 
   umap: async (id: number): Promise<UmapResponse> => {
     const { data } = await httpClient.get<UmapResponse>(`/datasets/${id}/umap`);
+    return data;
+  },
+};
+
+// 跨数据集语义对齐 API（v1.2 D7 加分项）
+export const alignmentApi = {
+  /** 触发同步对齐 */
+  align: async (payload: AlignRequest): Promise<AlignedDataset> => {
+    const { data } = await httpClient.post<AlignedDataset>('/datasets/align', payload);
+    return data;
+  },
+
+  /** 列出当前用户的对齐数据集 */
+  list: async (): Promise<AlignedDataset[]> => {
+    const { data } = await httpClient.get<AlignedDataset[]>('/datasets/aligned');
+    return data;
+  },
+
+  /** 查询单个对齐数据集详情 */
+  get: async (id: number): Promise<AlignedDataset> => {
+    const { data } = await httpClient.get<AlignedDataset>(`/datasets/aligned/${id}`);
+    return data;
+  },
+
+  /** 删除对齐数据集（含磁盘文件） */
+  remove: async (id: number): Promise<AlignedDatasetDeleteResponse> => {
+    const { data } = await httpClient.delete<AlignedDatasetDeleteResponse>(
+      `/datasets/aligned/${id}`,
+    );
     return data;
   },
 };

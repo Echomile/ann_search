@@ -13,6 +13,7 @@ import sys
 import types
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -349,3 +350,267 @@ def test_factory_returns_mock_when_anthropic_sdk_missing(
 
     client = get_llm_client()
     assert isinstance(client, MockLLMClient)
+
+
+# =============================================================================
+# v1.2 D4 LLM Function Calling Agent loop 测试
+# =============================================================================
+
+from app.schemas.rag import RagChatRequest  # noqa: E402
+from app.services.rag import (  # noqa: E402
+    ChatResponse,
+    ToolCall,
+    chat_with_tools,
+    get_session_detail,
+    list_user_sessions,
+)
+
+
+@pytest_asyncio.fixture
+async def seeded_dataset(
+    db_session: AsyncSession,
+    dataset_artifacts: tuple[Path, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[User, Dataset, BruteBackend, list[str]]:
+    """复用 dataset_artifacts，把 user/dataset/index 写库并注入 brute backend。"""
+    dataset_dir, meta_columns = dataset_artifacts
+    user, dataset, _record = await _seed_dataset_with_index(db_session, dataset_dir, meta_columns)
+    backend = BruteBackend(dim=8, metric="l2")
+    vectors = np.load(dataset_dir / "vectors.npy")
+    backend.build(vectors)
+    monkeypatch.setattr(search_service, "get_index_backend", lambda *a, **k: backend)
+    return user, dataset, backend, meta_columns
+
+
+def test_mock_chat_with_tools_list_datasets() -> None:
+    """query 含 “列出所有数据集” 时 MockLLMClient 返回 list_datasets tool_call。"""
+    client = MockLLMClient()
+    messages = [
+        {"role": "system", "content": "agent"},
+        {"role": "user", "content": "请帮我列出所有数据集"},
+    ]
+    resp = client.chat_with_tools(messages, tools=[])
+    assert isinstance(resp, ChatResponse)
+    assert resp.finish_reason == "tool_calls"
+    assert len(resp.tool_calls) == 1
+    assert resp.tool_calls[0].name == "list_datasets"
+
+
+def test_mock_chat_with_tools_search_by_cell_id() -> None:
+    """query 含 cell_id 时 MockLLMClient 返回 search_by_cell_id tool_call。"""
+    client = MockLLMClient()
+    messages = [
+        {"role": "system", "content": "agent\ncurrent_dataset_id=5"},
+        {"role": "user", "content": "找和 cell_id=cell_007 相似的细胞 top 3"},
+    ]
+    resp = client.chat_with_tools(messages, tools=[])
+    assert resp.finish_reason == "tool_calls"
+    tc = resp.tool_calls[0]
+    assert tc.name == "search_by_cell_id"
+    assert tc.arguments["cell_id"] == "cell_007"
+    assert tc.arguments["dataset_id"] == 5
+    assert tc.arguments["top_k"] == 3
+
+
+def test_mock_chat_with_tools_stop_after_tool_result() -> None:
+    """已经有 tool result 时 MockLLMClient 应进入收尾，返回 finish_reason=stop。"""
+    client = MockLLMClient()
+    messages = [
+        {"role": "user", "content": "列出数据集"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "list_datasets", "arguments": "{}"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "name": "list_datasets",
+            "content": json.dumps({"datasets": [{"id": 1, "name": "liver-tiny"}]}),
+        },
+    ]
+    resp = client.chat_with_tools(messages, tools=[])
+    assert resp.finish_reason == "stop"
+    assert "liver-tiny" in resp.content
+
+
+async def test_chat_with_mock_list_datasets(
+    db_session: AsyncSession,
+    dataset_artifacts: tuple[Path, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """端到端：query=列出所有数据集 → tool_call=list_datasets → 最终回答含数据集名。"""
+    dataset_dir, meta_columns = dataset_artifacts
+    user, dataset, _record = await _seed_dataset_with_index(db_session, dataset_dir, meta_columns)
+    monkeypatch.setattr(search_service, "get_index_backend", lambda *a, **k: None)
+
+    resp = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(query="请列出所有可用数据集"),
+        llm=MockLLMClient(),
+    )
+    assert resp.session_id > 0
+    assert resp.iterations == 2
+    assert resp.finish_reason == "stop"
+    assert any(t.name == "list_datasets" for t in resp.tool_trace)
+    assert dataset.name in resp.answer
+
+
+async def test_chat_with_mock_search_by_cell_id(
+    seeded_dataset: tuple[User, Dataset, BruteBackend, list[str]],
+    db_session: AsyncSession,
+) -> None:
+    """端到端：query=找和 cell ABC 相似 → tool_call=search_by_cell_id → answer 含相似细胞信息。"""
+    user, dataset, _backend, _meta = seeded_dataset
+    resp = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(
+            query="找和 cell_id=cell_001 相似的细胞 top 5",
+            dataset_id=dataset.id,
+        ),
+        llm=MockLLMClient(),
+    )
+    assert resp.finish_reason == "stop"
+    assert any(t.name == "search_by_cell_id" and t.ok for t in resp.tool_trace)
+    assert len(resp.citations) > 0
+    assert all(c.dataset_id == dataset.id for c in resp.citations)
+    assert "find top matches" in resp.answer or "cell_id" in resp.answer
+
+
+async def test_chat_multi_turn_session(
+    seeded_dataset: tuple[User, Dataset, BruteBackend, list[str]],
+    db_session: AsyncSession,
+) -> None:
+    """两轮对话：第一轮 list_datasets，第二轮基于结果继续 search_by_cell_id。"""
+    user, dataset, _backend, _meta = seeded_dataset
+
+    first = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(query="请列出所有可用数据集"),
+        llm=MockLLMClient(),
+    )
+    assert first.iterations == 2
+    sid = first.session_id
+
+    second = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(
+            query="基于结果，找和 cell_id=cell_001 相似的细胞 top 3",
+            dataset_id=dataset.id,
+            session_id=sid,
+        ),
+        llm=MockLLMClient(),
+    )
+    assert second.session_id == sid
+    assert any(t.name == "search_by_cell_id" for t in second.tool_trace)
+
+    detail = await get_session_detail(db_session, user.id, sid)
+    roles = [m.role for m in detail.messages]
+    assert roles.count("user") == 2
+    assert "assistant" in roles
+    assert "tool" in roles
+    assert detail.messages[0].role == "user"
+
+
+async def test_chat_session_persistence_and_listing(
+    db_session: AsyncSession,
+    dataset_artifacts: tuple[Path, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """创建 session → 写 messages → 拉 session 验证 history + list_user_sessions。"""
+    dataset_dir, meta_columns = dataset_artifacts
+    user, _dataset, _record = await _seed_dataset_with_index(db_session, dataset_dir, meta_columns)
+    monkeypatch.setattr(search_service, "get_index_backend", lambda *a, **k: None)
+
+    r1 = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(query="列出数据集"),
+        llm=MockLLMClient(),
+    )
+    r2 = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(query="再次列出"),
+        llm=MockLLMClient(),
+    )
+    assert r1.session_id != r2.session_id
+
+    sessions = await list_user_sessions(db_session, user.id)
+    assert len(sessions) >= 2
+    ids = {s.id for s in sessions}
+    assert {r1.session_id, r2.session_id}.issubset(ids)
+    target = next(s for s in sessions if s.id == r1.session_id)
+    assert target.message_count >= 3  # user + assistant(tool_calls) + tool + assistant
+    assert target.title.startswith("列出数据集")
+
+
+class _LoopingLLMClient:
+    """专用于测试的桩 LLM：始终返回 tool_call 触发 max_iterations 安全退出。"""
+
+    def parse_query(self, query: str, available_filters: list[str]):  # type: ignore[override]
+        return MockLLMClient().parse_query(query, available_filters)
+
+    def summarize(self, query: str, hits: list[dict[str, Any]]) -> str:  # type: ignore[override]
+        return "stub"
+
+    def chat_with_tools(  # type: ignore[override]
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> ChatResponse:
+        return ChatResponse(
+            finish_reason="tool_calls",
+            tool_calls=[ToolCall(id="loop", name="list_datasets", arguments={})],
+        )
+
+
+async def test_chat_max_iterations_safety(
+    db_session: AsyncSession,
+    dataset_artifacts: tuple[Path, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM 始终返回 tool_call 时应在 max_iterations 后强制停止。"""
+    dataset_dir, meta_columns = dataset_artifacts
+    user, _dataset, _record = await _seed_dataset_with_index(db_session, dataset_dir, meta_columns)
+    monkeypatch.setattr(search_service, "get_index_backend", lambda *a, **k: None)
+
+    resp = await chat_with_tools(
+        db=db_session,
+        user=user,
+        request=RagChatRequest(query="不会终止", max_iterations=3),
+        llm=_LoopingLLMClient(),
+    )
+    assert resp.iterations == 3
+    assert resp.finish_reason == "max_iterations"
+    assert "最大工具调用轮数" in resp.answer
+
+
+async def test_chat_with_invalid_session_id_returns_404(
+    db_session: AsyncSession,
+    dataset_artifacts: tuple[Path, list[str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """传入不存在的 session_id 应 404。"""
+    from fastapi import HTTPException
+
+    dataset_dir, meta_columns = dataset_artifacts
+    user, _dataset, _record = await _seed_dataset_with_index(db_session, dataset_dir, meta_columns)
+    monkeypatch.setattr(search_service, "get_index_backend", lambda *a, **k: None)
+
+    with pytest.raises(HTTPException) as ei:
+        await chat_with_tools(
+            db=db_session,
+            user=user,
+            request=RagChatRequest(query="hello", session_id=9999),
+            llm=MockLLMClient(),
+        )
+    assert ei.value.status_code == 404

@@ -14,6 +14,7 @@ from sqlalchemy import desc, select
 from starlette.responses import StreamingResponse
 
 from app.api.deps import CurrentUser, DbSession
+from app.models.aligned_dataset import AlignedDataset
 from app.models.dataset import Dataset
 from app.models.index_record import IndexRecord
 from app.models.search_log import SearchLog
@@ -467,6 +468,14 @@ async def search_multi_dataset(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="index_ids 长度须与 dataset_ids 一致",
+        )
+
+    # D7: 对齐路径——直接在统一向量空间上跑单库检索
+    if payload.aligned_dataset_id is not None:
+        return await _search_aligned_path(
+            db=db,
+            current_user_id=current_user.id,
+            payload=payload,
         )
 
     query_vector: list[float] | None = payload.vector
@@ -932,4 +941,127 @@ async def search_with_params(
         **base.model_dump(),
         effective_params=effective,
         ignored_params=ignored,
+    )
+
+
+async def _search_aligned_path(
+    *,
+    db: DbSession,
+    current_user_id: int,
+    payload: MultiDatasetSearchRequest,
+) -> SearchResponse:
+    """D7 对齐路径：在统一向量空间上做单库检索。
+
+    与原 multi-dataset 路径的关键差异：
+
+        - 走 :func:`search_service.async_search_aligned_dataset`，单库 brute
+          扫一遍即可，免去多数据集 min-max 归一化；
+        - 响应里回填 ``aligned_dataset_id``，前端据此切换提示文案；
+        - 仍然支持以 ``cell_id`` + ``source_dataset_id`` 发起查询，但要求该
+          cell 已被纳入对齐数据集；缺失时回退到把 ``cell_id`` 当作"在原始
+          数据集里查向量，再到对齐空间查邻居"的混合路径。
+
+    Args:
+        db: 数据库会话。
+        current_user_id: 当前用户 ID，用于权限与日志。
+        payload: 多数据集请求，必须带 ``aligned_dataset_id``。
+
+    Returns:
+        SearchResponse: 标准检索响应，``aligned_dataset_id`` 已回填。
+
+    Raises:
+        HTTPException: 404 对齐数据集 / cell 不存在；403 越权；
+            409 对齐数据集状态非 done；422 维度不匹配。
+    """
+    aligned = await db.get(AlignedDataset, payload.aligned_dataset_id)
+    if aligned is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"对齐数据集不存在: {payload.aligned_dataset_id}",
+        )
+    if aligned.created_by is not None and aligned.created_by != current_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该对齐数据集")
+    if aligned.status != "done":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"对齐数据集尚未就绪，当前状态: {aligned.status}",
+        )
+
+    # 解析 query_vector
+    query_vector: list[float] | None = payload.vector
+    exclude_cell_id: str | None = None
+    if query_vector is None:
+        # cell_id 路径：先在对齐数据集自己的 cell_ids 里找；找不到时回退到
+        # source_dataset 提取向量
+        from app.services.alignment import load_aligned_artifacts
+
+        try:
+            aligned_artifacts = load_aligned_artifacts(aligned)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)
+            ) from exc
+
+        cid_map: dict[str, int] = aligned_artifacts["cell_id_to_index"]
+        if payload.cell_id in cid_map:
+            query_vector = aligned_artifacts["vectors"][cid_map[payload.cell_id]].tolist()
+            exclude_cell_id = payload.cell_id
+        else:
+            source_id = payload.source_dataset_id or payload.dataset_ids[0]
+            source_dataset = await _get_dataset(db, source_id)
+            source_dir = _resolve_dataset_dir(source_dataset)
+            src_artifacts = search_service.load_dataset_artifacts(source_dir)
+            src_map: dict[str, int] = src_artifacts["cell_id_to_index"]
+            if payload.cell_id not in src_map:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"cell_id {payload.cell_id} 不存在于数据集 {source_id} 或对齐数据集",
+                )
+            src_vec = src_artifacts["vectors"][src_map[payload.cell_id]]
+            if int(src_vec.shape[-1]) != int(aligned.target_dim):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=(
+                        f"原数据集向量维度 {src_vec.shape[-1]} 与对齐空间 "
+                        f"{aligned.target_dim} 不一致，请改用 vector 参数"
+                    ),
+                )
+            query_vector = src_vec.tolist()
+    else:
+        if len(query_vector) != int(aligned.target_dim):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    f"vector 长度 {len(query_vector)} 与对齐空间维度 {aligned.target_dim} 不一致"
+                ),
+            )
+
+    start = time.perf_counter()
+    result = await search_service.async_search_aligned_dataset(
+        aligned=aligned,
+        query_vector=query_vector,
+        top_k=payload.top_k,
+        filters=payload.filters,
+        exclude_cell_id=exclude_cell_id,
+    )
+    latency_ms = (time.perf_counter() - start) * 1000.0
+
+    hits = _to_search_hits(list(result.get("results", [])))
+    await _log_search(
+        db,
+        dataset_id=payload.dataset_ids[0],
+        user_id=current_user_id,
+        top_k=payload.top_k,
+        filters=payload.filters,
+        latency_ms=latency_ms,
+    )
+    return SearchResponse(
+        dataset_id=None,
+        top_k=payload.top_k,
+        latency_ms=float(latency_ms),
+        index_backend="aligned-brute",
+        metric="l2",
+        total_candidates=int(result.get("total_candidates", 0) or 0),
+        hits=hits,
+        aligned_dataset_id=int(aligned.id),
     )

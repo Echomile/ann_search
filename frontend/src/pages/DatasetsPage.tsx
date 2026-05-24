@@ -6,13 +6,17 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
+  Modal,
   Popconfirm,
   Progress,
+  Select,
   Skeleton,
   Space,
   Steps,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
   message,
@@ -25,10 +29,13 @@ import {
   InboxOutlined,
   ReloadOutlined,
   CheckCircleTwoTone,
+  LinkOutlined,
   LoadingOutlined,
 } from '@ant-design/icons';
-import { datasetsApi } from '@/api/datasets';
+import { alignmentApi, datasetsApi } from '@/api/datasets';
 import type { Dataset, DatasetStatusName, UploadProgressResponse } from '@/types/dataset';
+import type { AlignMethod, AlignedDataset } from '@/types/aligned';
+import { Link, useNavigate } from 'react-router-dom';
 import { useDatasetStore } from '@/store/datasetStore';
 import { datasetStatusColor, formatDateTime } from '@/utils/format';
 import { extractError } from '@/utils/error';
@@ -139,6 +146,18 @@ const DatasetsPage = () => {
   const [form] = Form.useForm<UploadFormValues>();
   const currentDataset = useDatasetStore((s) => s.currentDataset);
   const setCurrentDataset = useDatasetStore((s) => s.setCurrentDataset);
+  const navigate = useNavigate();
+
+  // D7: 跨数据集对齐相关 state
+  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([]);
+  const [aligning, setAligning] = useState(false);
+  const [alignModalOpen, setAlignModalOpen] = useState(false);
+  const [alignedList, setAlignedList] = useState<AlignedDataset[]>([]);
+  const [alignForm] = Form.useForm<{
+    name?: string;
+    method: AlignMethod;
+    target_dim: number;
+  }>();
   const lastUploadRef = useRef<string | null>(null);
   // 轮询取消标记：组件卸载或下次上传开始时置 true，避免脏 setState
   const pollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
@@ -170,9 +189,65 @@ const DatasetsPage = () => {
     }
   }, [currentDataset, setCurrentDataset]);
 
+  // D7: 加载已存在的对齐数据集，用于"已对齐"区域展示
+  const fetchAlignedList = useCallback(async () => {
+    try {
+      const list = await alignmentApi.list();
+      setAlignedList(list);
+    } catch {
+      setAlignedList([]);
+    }
+  }, []);
+
+  // D7: 提交对齐请求（同步，等待后端完成 PCA / harmony 后跳转 search 页）
+  const handleAlignSubmit = useCallback(async () => {
+    const values = await alignForm.validateFields().catch(() => null);
+    if (!values) return;
+    if (selectedRowKeys.length < 2) {
+      message.error('至少选择 2 个数据集再触发对齐');
+      return;
+    }
+    setAligning(true);
+    try {
+      const aligned = await alignmentApi.align({
+        source_dataset_ids: selectedRowKeys,
+        method: values.method,
+        target_dim: values.target_dim,
+        name: values.name?.trim() || null,
+      });
+      message.success(
+        `对齐完成 #${aligned.id}，实际方法 ${aligned.method}，已切换到检索页`,
+      );
+      setAlignModalOpen(false);
+      setSelectedRowKeys([]);
+      void fetchAlignedList();
+      // 跳转到 search 页，便于立即试用对齐路径
+      navigate(`/search?aligned_dataset_id=${aligned.id}`);
+    } catch (err) {
+      message.error(extractError(err));
+    } finally {
+      setAligning(false);
+    }
+  }, [alignForm, selectedRowKeys, fetchAlignedList, navigate]);
+
+  // D7: 删除对齐数据集
+  const handleDeleteAligned = useCallback(
+    async (id: number) => {
+      try {
+        await alignmentApi.remove(id);
+        message.success(`对齐数据集 #${id} 已删除`);
+        void fetchAlignedList();
+      } catch (err) {
+        message.error(extractError(err));
+      }
+    },
+    [fetchAlignedList],
+  );
+
   useEffect(() => {
     void fetchAll();
-  }, [fetchAll]);
+    void fetchAlignedList();
+  }, [fetchAll, fetchAlignedList]);
 
   const pendingIds = useMemo(
     () => datasets.filter((d) => !FINAL_STATUSES.includes(d.status)).map((d) => d.id),
@@ -530,6 +605,29 @@ const DatasetsPage = () => {
         title="我的数据集"
         extra={
           <Space>
+            <Tooltip
+              title={
+                selectedRowKeys.length < 2
+                  ? '至少选择 2 个数据集 (status=ready) 才能触发跨数据集对齐'
+                  : `对所选 ${selectedRowKeys.length} 个数据集做语义对齐`
+              }
+            >
+              <Button
+                type="primary"
+                icon={<LinkOutlined />}
+                disabled={selectedRowKeys.length < 2}
+                onClick={() => {
+                  alignForm.setFieldsValue({
+                    method: 'intersect_only',
+                    target_dim: 30,
+                    name: '',
+                  });
+                  setAlignModalOpen(true);
+                }}
+              >
+                对齐 ({selectedRowKeys.length})
+              </Button>
+            </Tooltip>
             <Popconfirm
               title="清理失败数据集？"
               description="将删除当前用户名下所有 status=failed 或缺失向量文件的数据集（含磁盘）。"
@@ -555,6 +653,17 @@ const DatasetsPage = () => {
             rowKey="id"
             columns={columns}
             dataSource={datasets}
+            rowSelection={{
+              selectedRowKeys,
+              onChange: (keys) => setSelectedRowKeys(keys as number[]),
+              getCheckboxProps: (record) => ({
+                disabled: record.status !== 'ready',
+                title:
+                  record.status !== 'ready'
+                    ? '只有 status=ready 的数据集可参与对齐'
+                    : undefined,
+              }),
+            }}
             pagination={{ pageSize: 10 }}
             locale={{
               emptyText: loading ? (
@@ -573,6 +682,120 @@ const DatasetsPage = () => {
           />
         )}
       </Card>
+
+      <Card
+        title="对齐数据集 (D7)"
+        size="small"
+        extra={
+          <Button size="small" onClick={() => fetchAlignedList()}>
+            刷新
+          </Button>
+        }
+        style={{ marginTop: 16 }}
+      >
+        {alignedList.length === 0 ? (
+          <Empty description="尚无对齐数据集；勾选 ≥2 个 ready 数据集后点击「对齐」即可" />
+        ) : (
+          <Table<AlignedDataset>
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 5 }}
+            dataSource={alignedList}
+            columns={[
+              { title: 'ID', dataIndex: 'id', width: 60 },
+              { title: '名称', dataIndex: 'name' },
+              {
+                title: '方法',
+                dataIndex: 'method',
+                width: 120,
+                render: (m: string) => <Tag color="blue">{m}</Tag>,
+              },
+              {
+                title: '维度',
+                dataIndex: 'target_dim',
+                width: 70,
+              },
+              {
+                title: '细胞数',
+                dataIndex: 'cell_count',
+                width: 90,
+              },
+              {
+                title: '基因交集',
+                dataIndex: 'common_genes_count',
+                width: 90,
+              },
+              {
+                title: '状态',
+                dataIndex: 'status',
+                width: 90,
+                render: (s: string) => (
+                  <Tag color={s === 'done' ? 'success' : s === 'failed' ? 'error' : 'processing'}>
+                    {s}
+                  </Tag>
+                ),
+              },
+              {
+                title: '操作',
+                width: 160,
+                render: (_: unknown, row: AlignedDataset) => (
+                  <Space>
+                    <Link to={`/search?aligned_dataset_id=${row.id}`}>跨库检索</Link>
+                    <Popconfirm
+                      title={`确认删除对齐数据集 #${row.id}?`}
+                      okType="danger"
+                      onConfirm={() => handleDeleteAligned(row.id)}
+                    >
+                      <Button danger size="small" icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Card>
+
+      <Modal
+        title="跨数据集语义对齐"
+        open={alignModalOpen}
+        onCancel={() => setAlignModalOpen(false)}
+        onOk={handleAlignSubmit}
+        confirmLoading={aligning}
+        okText="开始对齐"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          style={{ marginBottom: 12 }}
+          showIcon
+          message={`将对 ${selectedRowKeys.length} 个数据集做基因集对齐：[${selectedRowKeys.join(', ')}]`}
+        />
+        <Form
+          form={alignForm}
+          layout="vertical"
+          initialValues={{ method: 'intersect_only', target_dim: 30 }}
+        >
+          <Form.Item label="对齐方法" name="method" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: 'intersect_only', label: 'intersect_only · 基因交集 + 统一 PCA' },
+                {
+                  value: 'harmony',
+                  label: 'harmony · 在 intersect 之上跑 batch correction (需 harmonypy)',
+                },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item label="对齐维度 target_dim" name="target_dim" rules={[{ required: true }]}>
+            <InputNumber min={2} max={512} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item label="对齐数据集名称（可选）" name="name">
+            <Input placeholder="不填则按 aligned-{method}-{ids} 自动生成" allowClear />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

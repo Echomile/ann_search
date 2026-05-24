@@ -26,6 +26,8 @@ export interface MultiDatasetSearchRequest {
   vector?: number[] | null;
   top_k: number;
   filters?: SearchFilters | null;
+  /** D7: 对齐数据集 ID；提供时走统一向量空间检索路径 */
+  aligned_dataset_id?: number | null;
 }
 
 export interface SearchHit {
@@ -44,6 +46,8 @@ export interface SearchResponse {
   metric: string | null;
   total_candidates: number | null;
   hits: SearchHit[];
+  /** D7: 仅在跨数据集 + aligned 路径下回填 */
+  aligned_dataset_id?: number | null;
 }
 
 // 批量检索（F1）：N 个查询并发，单数据集，复用 Redis 检索缓存

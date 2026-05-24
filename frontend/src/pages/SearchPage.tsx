@@ -12,6 +12,7 @@ import {
   Row,
   Select,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -20,11 +21,12 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { MinusCircleOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons';
-import { datasetsApi } from '@/api/datasets';
+import { alignmentApi, datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
 import { searchApi } from '@/api/search';
 import type { StreamDoneEvent } from '@/api/search';
 import type { Dataset } from '@/types/dataset';
+import type { AlignedDataset } from '@/types/aligned';
 import type { IndexRecord } from '@/types/indexRecord';
 import type {
   EnsembleHit,
@@ -69,6 +71,9 @@ interface MultiValues {
   cell_id: string;
   top_k: number;
   filters?: FilterRow[];
+  // D7: 当 use_aligned=true 时启用对齐路径
+  use_aligned?: boolean;
+  aligned_dataset_id?: number;
 }
 
 interface StreamValues {
@@ -129,6 +134,8 @@ const SearchPage = () => {
 
   const [activeTab, setActiveTab] = useState<TabKey>('by-id');
   const [datasets, setDatasets] = useState<Dataset[]>([]);
+  // D7: 对齐数据集列表，供 multi-dataset Tab 的 aligned 路径选择
+  const [alignedDatasets, setAlignedDatasets] = useState<AlignedDataset[]>([]);
   const [indexes, setIndexes] = useState<IndexRecord[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<SearchResponse | null>(null);
@@ -164,6 +171,17 @@ const SearchPage = () => {
     }
   }, []);
 
+  // D7: 加载已就绪的对齐数据集，仅 status=done 的可参与检索
+  const loadAlignedDatasets = useCallback(async () => {
+    try {
+      const list = await alignmentApi.list();
+      setAlignedDatasets(list.filter((a) => a.status === 'done'));
+    } catch {
+      // 静默失败：未对齐过的项目不应阻断检索页加载
+      setAlignedDatasets([]);
+    }
+  }, []);
+
   const loadIndexes = useCallback(async (datasetId?: number) => {
     if (!datasetId) {
       setIndexes([]);
@@ -179,7 +197,8 @@ const SearchPage = () => {
 
   useEffect(() => {
     void loadDatasets();
-  }, [loadDatasets]);
+    void loadAlignedDatasets();
+  }, [loadDatasets, loadAlignedDatasets]);
 
   // 根据当前选中数据集，默认填充表单
   useEffect(() => {
@@ -294,6 +313,10 @@ const SearchPage = () => {
       message.error('至少选择一个数据集');
       return;
     }
+    if (v.use_aligned && !v.aligned_dataset_id) {
+      message.error('请先选择一个对齐数据集，或关闭对齐路径');
+      return;
+    }
     setSubmitting(true);
     try {
       const resp = await searchApi.multiDataset({
@@ -302,8 +325,13 @@ const SearchPage = () => {
         cell_id: v.cell_id.trim(),
         top_k: v.top_k,
         filters: buildFilters(v.filters),
+        // D7: aligned 路径走对齐空间单库检索
+        aligned_dataset_id: v.use_aligned ? v.aligned_dataset_id : null,
       });
       setResult(resp);
+      if (resp.aligned_dataset_id != null) {
+        message.success(`使用对齐数据集 #${resp.aligned_dataset_id} 完成跨数据集检索`);
+      }
     } catch (err) {
       message.error(extractError(err));
     } finally {
@@ -615,9 +643,50 @@ const SearchPage = () => {
         <Form
           form={multiForm}
           layout="vertical"
-          initialValues={{ top_k: 10, filters: [] }}
+          initialValues={{ top_k: 10, filters: [], use_aligned: false }}
           onFinish={handleSubmitMulti}
         >
+          <Row gutter={16} style={{ marginBottom: 12 }}>
+            <Col xs={24} md={8}>
+              <Form.Item
+                label="使用对齐数据集 (D7)"
+                name="use_aligned"
+                valuePropName="checked"
+                tooltip={"启用后将走统一对齐向量空间的单库检索；关闭走 \"各自查 + min-max\" 兼容路径"}
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={16}>
+              <Form.Item
+                shouldUpdate={(prev, next) => prev.use_aligned !== next.use_aligned}
+                noStyle
+              >
+                {({ getFieldValue }) =>
+                  getFieldValue('use_aligned') ? (
+                    <Form.Item
+                      label="对齐数据集"
+                      name="aligned_dataset_id"
+                      rules={[{ required: true, message: '请选择一个已完成的对齐数据集' }]}
+                    >
+                      <Select
+                        placeholder={
+                          alignedDatasets.length === 0
+                            ? '尚无对齐数据集，请到「数据集管理」页触发对齐'
+                            : '选择一个对齐数据集'
+                        }
+                        options={alignedDatasets.map((a) => ({
+                          value: a.id,
+                          label: `#${a.id} · ${a.name} · ${a.method} · ${a.cell_count} cells`,
+                        }))}
+                        disabled={alignedDatasets.length === 0}
+                      />
+                    </Form.Item>
+                  ) : null
+                }
+              </Form.Item>
+            </Col>
+          </Row>
           <Row gutter={16}>
             <Col xs={24} md={12}>
               <Form.Item label="参与检索的数据集" name="dataset_ids" rules={[{ required: true }]}>

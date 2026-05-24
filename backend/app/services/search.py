@@ -868,3 +868,99 @@ async def async_search_with_runtime_params(
         )
 
     return await asyncio.to_thread(_do)
+
+
+# ---------------------------------------------------------------------------
+# D7: 对齐数据集检索（跨数据集统一向量空间）
+# ---------------------------------------------------------------------------
+
+
+def search_aligned_dataset(
+    aligned: Any,
+    query_vector: np.ndarray | list[float],
+    top_k: int = 10,
+    filters: dict[str, Any] | None = None,
+    exclude_cell_id: str | None = None,
+) -> dict[str, Any]:
+    """在对齐数据集上执行单库检索（D7 加分项）。
+
+    对齐数据集的向量来自跨数据集 PCA / harmony 校正后的统一空间，
+    无需 min-max 归一化即可直接合并结果。内部用 brute 后端（``l2``）即可，
+    与原始数据集的 ANN 后端解耦，简化部署。
+
+    Args:
+        aligned: :class:`app.models.aligned_dataset.AlignedDataset` 实例。
+        query_vector: 查询向量；维度需与 ``aligned.target_dim`` 一致。
+        top_k: 返回近邻数量。
+        filters: 元数据过滤条件，作用于合并后的 metadata（典型用例：
+            ``{"source_dataset_id": [1, 2]}``）。
+        exclude_cell_id: 需要从结果剔除的 cell_id。
+
+    Returns:
+        dict[str, Any]: 与 :func:`search_with_backend` 同 shape，但每个 hit 额外携带
+        ``source_dataset_id``（取自 ``cell_map``），便于前端展示。
+
+    Raises:
+        RuntimeError: 对齐数据集制品缺失或向量维度不匹配。
+    """
+    from app.services.alignment import load_aligned_artifacts
+    from app.services.ann.brute_backend import BruteBackend
+
+    artifacts = load_aligned_artifacts(aligned)
+    vectors: np.ndarray = artifacts["vectors"]
+    cell_ids: list[str] = artifacts["cell_ids"]
+    metadata: pd.DataFrame = artifacts["metadata"]
+    cell_map: list[dict[str, Any]] = artifacts["cell_map"]
+
+    query = np.asarray(query_vector, dtype=np.float32)
+    if vectors.ndim != 2 or vectors.shape[1] != query.shape[-1]:
+        raise RuntimeError(f"对齐向量维度不匹配 expected={vectors.shape[1]} got={query.shape[-1]}")
+
+    backend = BruteBackend(dim=int(vectors.shape[1]), metric="l2")
+    backend.build(vectors)
+
+    exclude_indices: set[int] | None = None
+    if exclude_cell_id is not None:
+        cid_map: dict[str, int] = artifacts["cell_id_to_index"]
+        if exclude_cell_id in cid_map:
+            exclude_indices = {cid_map[exclude_cell_id]}
+
+    result = search_with_backend(
+        backend=backend,
+        cell_ids=cell_ids,
+        metadata=metadata,
+        query_vector=query,
+        top_k=top_k,
+        filters=filters,
+        exclude_indices=exclude_indices,
+        metric="l2",
+    )
+
+    # 回填 source_dataset_id（从 cell_map 索引）
+    sid_by_cell = {entry["cell_id"]: int(entry["source_dataset_id"]) for entry in cell_map}
+    for hit in result.get("results", []):
+        cid = hit["cell_id"]
+        if cid in sid_by_cell:
+            hit["source_dataset_id"] = sid_by_cell[cid]
+    return result
+
+
+async def async_search_aligned_dataset(
+    aligned: Any,
+    query_vector: np.ndarray | list[float],
+    top_k: int = 10,
+    filters: dict[str, Any] | None = None,
+    exclude_cell_id: str | None = None,
+) -> dict[str, Any]:
+    """:func:`search_aligned_dataset` 的 ``asyncio.to_thread`` 包装。
+
+    把 CPU/numpy 密集型工作卸载到线程池，避免阻塞 FastAPI 事件循环。
+    """
+    return await asyncio.to_thread(
+        search_aligned_dataset,
+        aligned,
+        query_vector,
+        top_k,
+        filters,
+        exclude_cell_id,
+    )
