@@ -67,3 +67,43 @@ export interface SearchStats {
   by_dataset: DatasetStat[];
   hourly_24h: HourlyBucket[];
 }
+
+// v1.2 C3 · recall-QPS 帕累托扫描相关类型
+
+export interface SweepRequest {
+  dataset_id: number;
+  backends: string[];
+  top_k?: number;
+  query_count?: number;
+  ef_search_grid?: number[] | null;
+  nprobe_grid?: number[] | null;
+}
+
+export interface SweepPoint {
+  id: number;
+  backend: string;
+  params_json: Record<string, number | string | boolean>;
+  recall: number;
+  qps: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number | null;
+  mem_mb: number;
+  on_pareto: boolean;
+  created_at: string;
+}
+
+export interface SweepRun {
+  id: number;
+  dataset_id: number;
+  created_by: number | null;
+  status: 'pending' | 'running' | 'done' | 'failed';
+  top_k: number;
+  query_count: number;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+  created_at: string;
+  points: SweepPoint[];
+  pareto_count: number;
+}

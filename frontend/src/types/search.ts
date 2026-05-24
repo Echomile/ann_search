@@ -103,3 +103,19 @@ export interface EnsembleSearchResponse {
   // 后端 schema 用 ``dict[str, float]``：key 为 ``str(index_id)``
   per_index_latency_ms: Record<string, number>;
 }
+
+// v1.2 D1 · 带运行时参数调整的检索（参数仪表盘用）
+export interface SearchWithParamsRequest {
+  dataset_id: number;
+  index_id?: number | null;
+  cell_id?: string | null;
+  vector?: number[] | null;
+  top_k: number;
+  runtime_params?: Record<string, number | string | boolean>;
+  filters?: SearchFilters | null;
+}
+
+export interface SearchResponseWithParams extends SearchResponse {
+  effective_params: Record<string, number | string | boolean>;
+  ignored_params: string[];
+}

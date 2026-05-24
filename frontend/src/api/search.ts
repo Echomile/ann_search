@@ -9,6 +9,8 @@ import type {
   SearchByVectorRequest,
   SearchHit,
   SearchResponse,
+  SearchResponseWithParams,
+  SearchWithParamsRequest,
 } from '@/types/search';
 
 // F6 SSE 流式检索：done 事件回填整体汇总信息
@@ -147,6 +149,15 @@ export const searchApi = {
 
   ensemble: async (payload: EnsembleSearchRequest): Promise<EnsembleSearchResponse> => {
     const { data } = await httpClient.post<EnsembleSearchResponse>('/search/ensemble', payload);
+    return data;
+  },
+
+  // v1.2 D1: 带运行时参数调整的检索（参数仪表盘用）
+  withParams: async (payload: SearchWithParamsRequest): Promise<SearchResponseWithParams> => {
+    const { data } = await httpClient.post<SearchResponseWithParams>(
+      '/search/with_params',
+      payload,
+    );
     return data;
   },
 };

@@ -13,6 +13,7 @@ import {
   Space,
   Statistic,
   Table,
+  Tabs,
   Tag,
   Typography,
   message,
@@ -35,6 +36,7 @@ import { useDatasetStore } from '@/store/datasetStore';
 import { formatDateTime, formatMemoryMb, formatSeconds } from '@/utils/format';
 import { extractError } from '@/utils/error';
 import PlotlyChart, { type PlotlyData } from '@/components/PlotlyChart';
+import SweepTab from '@/components/evaluation/SweepTab';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -341,18 +343,8 @@ const EvaluationPage = () => {
     },
   ];
 
-  return (
-    <div>
-      <Title level={3}>性能评测</Title>
-      <Paragraph type="secondary">
-        对指定 ANN 索引执行 Recall / 延迟分位 / QPS 评测，结果异步落盘。
-        {currentIndex == null && (
-          <Text type="secondary" style={{ marginLeft: 12 }}>
-            可前往 <Link to="/indexes">索引管理</Link> 选用索引以预填。
-          </Text>
-        )}
-      </Paragraph>
-
+  const basicTabContent = (
+    <>
       <Card title="发起评测" style={{ marginBottom: 24 }}>
         <Form form={form} layout="vertical">
           <Row gutter={16}>
@@ -597,6 +589,33 @@ const EvaluationPage = () => {
           </>
         )}
       </Card>
+    </>
+  );
+
+  return (
+    <div>
+      <Title level={3}>性能评测</Title>
+      <Paragraph type="secondary">
+        对指定 ANN 索引执行 Recall / 延迟分位 / QPS 评测，结果异步落盘；v1.2 新增「参数扫描」Tab
+        提供 recall-QPS 帕累托曲线 + 滑块交互式 Top-K 预览。
+        {currentIndex == null && (
+          <Text type="secondary" style={{ marginLeft: 12 }}>
+            可前往 <Link to="/indexes">索引管理</Link> 选用索引以预填。
+          </Text>
+        )}
+      </Paragraph>
+
+      <Tabs
+        defaultActiveKey="basic"
+        items={[
+          { key: 'basic', label: '评测 (基础)', children: basicTabContent },
+          {
+            key: 'sweep',
+            label: '参数扫描 (v1.2)',
+            children: <SweepTab defaultDatasetId={watchedDatasetId} />,
+          },
+        ]}
+      />
     </div>
   );
 };

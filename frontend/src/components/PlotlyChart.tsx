@@ -12,6 +12,8 @@ type PlotComponentProps = ComponentProps<typeof Plot>;
 export type PlotlyData = PlotComponentProps['data'];
 export type PlotlyLayout = PlotComponentProps['layout'];
 export type PlotlyConfig = NonNullable<PlotComponentProps['config']>;
+export type PlotlyClickEvent = Parameters<NonNullable<PlotComponentProps['onClick']>>[0];
+export type PlotlyHoverEvent = Parameters<NonNullable<PlotComponentProps['onHover']>>[0];
 
 interface PlotlyChartProps {
   data: PlotlyData;
@@ -19,6 +21,8 @@ interface PlotlyChartProps {
   config?: Partial<PlotlyConfig>;
   height?: number | string;
   loading?: boolean;
+  onClick?: PlotComponentProps['onClick'];
+  onHover?: PlotComponentProps['onHover'];
 }
 
 const DEFAULT_FONT = {
@@ -36,7 +40,15 @@ const DEFAULT_CONFIG: Partial<PlotlyConfig> = {
 };
 
 // react-plotly.js 的轻封装：统一字体、留白、响应式与 loading 态
-const PlotlyChart = ({ data, layout, config, height = 360, loading }: PlotlyChartProps) => {
+const PlotlyChart = ({
+  data,
+  layout,
+  config,
+  height = 360,
+  loading,
+  onClick,
+  onHover,
+}: PlotlyChartProps) => {
   const mergedLayout = useMemo<Partial<PlotlyLayout>>(
     () => ({
       autosize: true,
@@ -64,6 +76,8 @@ const PlotlyChart = ({ data, layout, config, height = 360, loading }: PlotlyChar
         config={mergedConfig}
         useResizeHandler
         style={{ width: '100%', height: '100%' }}
+        onClick={onClick}
+        onHover={onHover}
       />
     </div>
   );
