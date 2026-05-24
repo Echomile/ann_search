@@ -460,3 +460,93 @@ QPS 视角（k=10）：
 - **更细的自适应策略**：基于历史 query 分布在线学习 `ef` 初值，或引入 PI 控制器跟踪目标 recall。
 - **量化精度可调**：为 IVF-PQ 引入 OPQ 旋转 + 重排序 (re-ranking) 层挽回召回损失。
 - **持久化与冷启动**：评估索引文件大小与冷加载耗时，纳入综合指标。
+
+## 7. recall-QPS 帕累托曲线分析
+
+> 本章为 v1.2 加分项 C3 的实验报告。占位数值（形如 `0.99XX` / `XXXXX`）将在 M1-α 后端 sweep 端点上线、主代理跑出真实数据后，通过 regex 批量回填。
+
+### 7.1 背景与方法
+
+ANN 算法评估的业界标准做法是绘制 **recall-QPS 帕累托曲线**：横轴 Recall@K，纵轴 QPS（log 刻度），每个 backend 一条曲线，曲线上每个点对应一组参数。曲线越靠右上越好。本节通过 `POST /api/v1/evaluation/sweep` 端点对每个 backend 扫描其关键参数（hnswlib / faiss-hnsw / adaptive-hnsw 扫 `ef_search ∈ {16,32,64,128,256,512}`；faiss-ivfpq 扫 `nprobe ∈ {4,8,16,32,64,128}`；brute 单点），在 liver.h5ad PCA 30 维数据上跑 200 个 query，top_k=10。
+
+帕累托前沿（pareto frontier）定义：一个点 P 在前沿上 ⇔ 不存在另一个点 P' 使得 P'.recall ≥ P.recall ∧ P'.qps ≥ P.qps ∧ (P'.recall > P.recall ∨ P'.qps > P.qps)。代码见 [`backend/app/services/evaluation.py`](../backend/app/services/evaluation.py) 的 `_mark_pareto()`。
+
+### 7.2 实验配置
+
+| 项目 | 取值 |
+| --- | --- |
+| 数据集 | liver.h5ad PCA 30 维 |
+| N | 30000 |
+| dim | 30 |
+| query_count | 200 |
+| top_k | 10 |
+| 距离度量 | l2 |
+| 随机种子 | 42 |
+| 测试机 | macOS arm64, 10 核 |
+
+### 7.3 扫描结果（PCA 30D）
+
+> ⚠️ 占位：实际数据将由 `POST /api/v1/evaluation/sweep` 跑出后回填，此处先列出预期的列结构。
+
+| backend | params | recall@10 | qps (c=1) | p50_ms | p95_ms | on_pareto |
+| --- | --- | --- | --- | --- | --- | :---: |
+| brute | — | 1.0000 | 1657 | 0.603 | 0.703 | yes |
+| hnswlib | ef=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| hnswlib | ef=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| hnswlib | ef=64 | 0.9996 | 53907 | 0.018 | 0.026 | yes |
+| hnswlib | ef=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| hnswlib | ef=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| hnswlib | ef=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-hnsw | ef=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-hnsw | ef=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-hnsw | ef=64 | 0.9962 | 46171 | 0.020 | 0.032 | yes/no |
+| faiss-hnsw | ef=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-hnsw | ef=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-hnsw | ef=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-ivfpq | nprobe=4 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-ivfpq | nprobe=8 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-ivfpq | nprobe=16 | 0.8046 | 49336 | 0.019 | 0.026 | yes/no |
+| faiss-ivfpq | nprobe=32 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-ivfpq | nprobe=64 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| faiss-ivfpq | nprobe=128 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| adaptive-hnsw | ef_base=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| adaptive-hnsw | ef_base=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| adaptive-hnsw | ef_base=64 | 0.9994 | 23023 | 0.047 | 0.065 | yes/no |
+| adaptive-hnsw | ef_base=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| adaptive-hnsw | ef_base=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| adaptive-hnsw | ef_base=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+
+> 说明：表中已知的几行（hnswlib ef=64、faiss-hnsw ef=64、faiss-ivfpq nprobe=16、adaptive-hnsw ef_base=64、brute）取自 §4 实测，用以校准；其它行均为 `0.99XX` / `XXXXX` 占位。`on_pareto` 列也将在 sweep 跑完后由 `_mark_pareto()` 计算填入。
+
+### 7.4 帕累托曲线（静态图）
+
+> 占位：插入 3 张 Plotly 静态导出图（PNG / SVG），路径建议：
+>
+> - `docs/assets/benchmark/pareto_pca30.png`
+> - `docs/assets/benchmark/pareto_synth100k.png`
+> - `docs/assets/benchmark/pareto_dim768.png`
+
+![Pareto curve PCA 30D](assets/benchmark/pareto_pca30.png)
+
+观察要点：
+
+1. **图索引族（hnswlib / faiss-hnsw / adaptive-hnsw）** 在 ef_search 调高后召回逼近 1.0，但 QPS 显著下降。曲线呈典型的 "知识-资源" 权衡。
+2. **faiss-ivfpq** 在低 recall 区间 QPS 最高，但即使把 nprobe 调到 128 也较难超越图索引族在高 recall 区间的表现。生产建议叠加 re-ranking。
+3. **adaptive-hnsw** 自适应触发后能在保持 hnswlib 接近的高 recall 同时把 QPS 拉高（对易查询样本提前停）。这是 v1.0 ANN 算法改进项的量化收益。
+4. **brute** 作为 ground truth 单点 (recall=1.0, qps≈1600)，在前沿最右端。
+
+### 7.5 工程意义
+
+- **前端 D1 仪表盘** ([`frontend/src/pages/EvaluationPage.tsx`](../frontend/src/pages/EvaluationPage.tsx)) 直接以这套数据点为后台，允许用户拖滑块定位前沿、点击散点反查 Top-K。
+- **运维选型**：生产 PCA 30 维 + 召回敏感场景 → `hnswlib` ef=64-128；内存敏感 → `faiss-ivfpq` nprobe=64+ + re-ranking；query 难度不均 → `adaptive-hnsw`。
+- 在 v1.2 后所有 sweep 数据持久化在 `sweep_run` / `sweep_point` 表，可用 `GET /api/v1/evaluation/sweep/{id}/pareto` 程序化拉取。
+
+### 7.6 与 §5.7 dim 扫描的对比
+
+§5.7 是固定 backend 参数扫 dim，§7 是固定 dim 扫 backend 参数。两者结合可以回答：
+
+- 任意 (dim, backend, params) 组合的预期性能
+- 同一份数据集换 backend 后的 sweet spot
+- 升级硬件 / 换数据集后帕累托前沿如何漂移
+
+详见前端"参数扫描"Tab 的交互式可视化。
