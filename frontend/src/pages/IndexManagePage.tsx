@@ -44,6 +44,16 @@ const BACKEND_OPTIONS: { value: IndexBackend; label: string; desc: string }[] = 
   { value: 'faiss-hnsw', label: 'faiss-hnsw', desc: 'FAISS 实现的 HNSW' },
   { value: 'faiss-ivfpq', label: 'faiss-ivfpq', desc: '内存受限场景，需要训练 PQ' },
   { value: 'brute', label: 'brute', desc: '暴力搜索，用于评测基准' },
+  {
+    value: 'adaptive-hnsw',
+    label: 'adaptive-hnsw',
+    desc: 'v1.0 算法改进：自适应 ef_search + 早停',
+  },
+  {
+    value: 'sparse-brute',
+    label: 'sparse-brute',
+    desc: 'v1.2 加分项 C5：稀疏 HVG 向量直接检索（跳过 PCA）',
+  },
 ];
 
 const METRIC_OPTIONS: DistanceMetric[] = ['l2', 'cosine', 'ip'];
@@ -75,6 +85,12 @@ const BACKEND_PARAMS: Record<IndexBackend, ParamDef[]> = {
     { key: 'nprobe', label: 'nprobe', defaultValue: 16, min: 1, max: 4096 },
   ],
   brute: [],
+  'adaptive-hnsw': [
+    { key: 'M', label: 'M', defaultValue: 16, min: 4, max: 128 },
+    { key: 'ef_construction', label: 'ef_construction', defaultValue: 200, min: 16, max: 2000 },
+    { key: 'ef_search', label: 'ef_search (起始)', defaultValue: 32, min: 1, max: 2000 },
+  ],
+  'sparse-brute': [],
 };
 
 interface BuildFormValues {

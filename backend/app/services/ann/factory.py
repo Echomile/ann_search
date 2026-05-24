@@ -7,6 +7,7 @@ from app.services.ann.base import IndexBackend
 from app.services.ann.brute_backend import BruteBackend
 from app.services.ann.faiss_backend import FaissHnswBackend, FaissIvfPqBackend
 from app.services.ann.hnswlib_backend import HnswlibBackend
+from app.services.ann.sparse_backend import SparseBruteBackend
 
 _BACKENDS: dict[str, type[IndexBackend]] = {
     "hnswlib": HnswlibBackend,
@@ -14,6 +15,7 @@ _BACKENDS: dict[str, type[IndexBackend]] = {
     "faiss-ivfpq": FaissIvfPqBackend,
     "brute": BruteBackend,
     "adaptive-hnsw": AdaptiveHnswBackend,
+    "sparse-brute": SparseBruteBackend,
 }
 
 
@@ -21,8 +23,9 @@ def create_backend(backend_name: str, dim: int, metric: str = "l2") -> IndexBack
     """根据后端名称创建 :class:`IndexBackend` 实例。
 
     Args:
-        backend_name: 后端标识，取值 ``hnswlib | faiss-hnsw | faiss-ivfpq | brute``。
-        dim: 向量维度。
+        backend_name: 后端标识，取值 ``hnswlib | faiss-hnsw | faiss-ivfpq |
+            brute | adaptive-hnsw | sparse-brute``。
+        dim: 向量维度。``sparse-brute`` 下对应 HVG 数量（如 5000）。
         metric: 距离度量，``l2 | cosine | ip``。
 
     Returns:

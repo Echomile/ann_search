@@ -90,6 +90,7 @@ async def preprocess_dataset(ctx: dict[str, Any], dataset_id: int) -> dict[str, 
         cell_count=result["cell_count"],
         vector_dim=result["vector_dim"],
         vector_source=result["vector_source"],
+        vector_format=result.get("vector_format", "dense"),
         meta_columns=result["meta_columns"],
     )
     logger.info(

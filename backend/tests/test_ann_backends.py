@@ -56,9 +56,16 @@ def _recall(pred: np.ndarray, gt: np.ndarray) -> float:
 
 
 def test_factory_lists_backends() -> None:
-    """factory 应注册全部 5 个后端（4 基础 + 1 改进版 adaptive-hnsw）。"""
+    """factory 应注册全部 6 个后端（4 基础 + adaptive-hnsw + sparse-brute）。"""
     names = set(list_backends())
-    assert names == {"hnswlib", "faiss-hnsw", "faiss-ivfpq", "brute", "adaptive-hnsw"}
+    assert names == {
+        "hnswlib",
+        "faiss-hnsw",
+        "faiss-ivfpq",
+        "brute",
+        "adaptive-hnsw",
+        "sparse-brute",
+    }
 
 
 def test_factory_unknown_backend_raises() -> None:
@@ -254,3 +261,133 @@ def test_cosine_metric_consistency(vectors: np.ndarray, queries: np.ndarray) -> 
     idx2, _ = faiss_hnsw.search(queries, top_k=1)
     hit2 = float(np.mean(idx2[:, 0] == gt_top1[:, 0]))
     assert hit2 > 0.9, f"faiss-hnsw cosine top1 hit={hit2:.3f}"
+
+
+# -----------------------------------------------------------------------------
+# M2.C5: SparseBruteBackend 用例
+# -----------------------------------------------------------------------------
+
+
+def _make_sparse_dataset(n: int = 100, dim: int = 500, sparsity: float = 0.95, seed: int = 123):
+    """构造稀疏度 ``sparsity`` 的 (dense_ndarray, csr_matrix) 配对数据，用于 dense vs sparse 对照。
+
+    Args:
+        n: 样本数。
+        dim: 维度。
+        sparsity: 零比例，``0.95`` 即 95% 元素为 0。
+        seed: 随机种子。
+
+    Returns:
+        tuple[np.ndarray, scipy.sparse.csr_matrix]: 同份数据的 dense 与 CSR 表示。
+    """
+    from scipy import sparse as sp
+
+    rng = np.random.default_rng(seed)
+    dense = rng.standard_normal(size=(n, dim)).astype(np.float32)
+    mask = (rng.random(size=(n, dim)) >= sparsity).astype(np.float32)
+    dense = dense * mask
+    csr = sp.csr_matrix(dense)
+    return dense, csr
+
+
+def test_sparse_brute_build_search() -> None:
+    """合成稀疏数据 (N=100, dim=500, 95% sparsity)：build + search，self-search top-1 = self。"""
+    from app.services.ann.sparse_backend import SparseBruteBackend
+
+    dense, csr = _make_sparse_dataset(n=100, dim=500, sparsity=0.95, seed=123)
+    backend = SparseBruteBackend(dim=500, metric="l2")
+    backend.build(csr)
+    assert backend.name == "sparse-brute"
+
+    idx, dist = backend.search(dense, top_k=1)
+    assert idx.shape == (100, 1)
+    np.testing.assert_array_equal(idx[:, 0], np.arange(100, dtype=np.int64))
+    np.testing.assert_allclose(dist[:, 0], 0.0, atol=1e-4)
+
+
+def test_sparse_brute_recall_vs_dense() -> None:
+    """同一份稀疏数据：SparseBruteBackend 与 BruteBackend 的 top-10 结果应完全一致。"""
+    from app.services.ann.sparse_backend import SparseBruteBackend
+
+    dense, csr = _make_sparse_dataset(n=200, dim=300, sparsity=0.92, seed=321)
+
+    dense_be = BruteBackend(dim=300, metric="l2", use_numba=False)
+    dense_be.build(dense)
+    sparse_be = SparseBruteBackend(dim=300, metric="l2")
+    sparse_be.build(csr)
+
+    rng = np.random.default_rng(7)
+    query_idx = rng.choice(200, size=20, replace=False)
+    queries = dense[query_idx]
+
+    idx_dense, dist_dense = dense_be.search(queries, top_k=10)
+    idx_sparse, dist_sparse = sparse_be.search(queries, top_k=10)
+    # 排序后比较集合一致性，避免 tie 的顺序差异
+    np.testing.assert_array_equal(np.sort(idx_dense, axis=1), np.sort(idx_sparse, axis=1))
+    # 距离公式数值一致（float32 容忍 1e-3 相对误差）
+    np.testing.assert_allclose(
+        np.sort(dist_dense, axis=1),
+        np.sort(dist_sparse, axis=1),
+        rtol=1e-3,
+        atol=1e-3,
+    )
+
+
+def test_sparse_brute_save_load(tmp_path: Path) -> None:
+    """build → save → 新实例 load → search 结果与原实例完全一致。"""
+    from app.services.ann.sparse_backend import SparseBruteBackend
+
+    dense, csr = _make_sparse_dataset(n=80, dim=200, sparsity=0.9, seed=2024)
+    backend = SparseBruteBackend(dim=200, metric="l2")
+    backend.build(csr)
+    idx1, dist1 = backend.search(dense[:10], top_k=5)
+
+    path = tmp_path / "sparse.npz"
+    backend.save(str(path))
+    assert path.exists()
+
+    reloaded = SparseBruteBackend(dim=200, metric="l2")
+    reloaded.load(str(path))
+    idx2, dist2 = reloaded.search(dense[:10], top_k=5)
+
+    np.testing.assert_array_equal(idx1, idx2)
+    np.testing.assert_allclose(dist1, dist2, rtol=1e-5, atol=1e-5)
+
+
+def test_sparse_brute_memory_estimation() -> None:
+    """``memory_mb`` 应等于 ``data.nbytes + indices.nbytes + indptr.nbytes`` 折算 MB。"""
+    from app.services.ann.sparse_backend import SparseBruteBackend
+
+    _, csr = _make_sparse_dataset(n=150, dim=400, sparsity=0.93, seed=11)
+    backend = SparseBruteBackend(dim=400, metric="l2")
+    backend.build(csr)
+
+    s = backend._sparse_vectors
+    assert s is not None
+    expected_bytes = s.data.nbytes + s.indices.nbytes + s.indptr.nbytes
+    expected_mb = expected_bytes / (1024 * 1024)
+    np.testing.assert_allclose(backend.memory_mb(), expected_mb, rtol=1e-9)
+    assert backend.memory_mb() > 0
+
+
+def test_sparse_brute_factory_dispatch() -> None:
+    """factory 应能创建 sparse-brute 实例，且名称与 list_backends 一致。"""
+    backend = create_backend("sparse-brute", dim=128, metric="l2")
+    assert backend.name == "sparse-brute"
+    assert "sparse-brute" in list_backends()
+
+
+def test_sparse_brute_cosine_consistency() -> None:
+    """cosine 度量下，sparse-brute 与 dense brute 的 top-1 应完全一致。"""
+    from app.services.ann.sparse_backend import SparseBruteBackend
+
+    dense, csr = _make_sparse_dataset(n=80, dim=200, sparsity=0.9, seed=99)
+    dense_be = BruteBackend(dim=200, metric="cosine")
+    dense_be.build(dense)
+    sparse_be = SparseBruteBackend(dim=200, metric="cosine")
+    sparse_be.build(csr)
+
+    queries = dense[:10]
+    idx_d, _ = dense_be.search(queries, top_k=1)
+    idx_s, _ = sparse_be.search(queries, top_k=1)
+    np.testing.assert_array_equal(idx_d, idx_s)

@@ -13,6 +13,7 @@ from typing import Any
 
 import numpy as np
 from arq.connections import ArqRedis
+from scipy import sparse as sp
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -77,7 +78,18 @@ async def build_index(ctx: dict[str, Any], index_id: int) -> dict[str, Any]:
             return result
 
         try:
-            vectors = np.load(dataset.vectors_path).astype(np.float32, copy=False)
+            vector_format = getattr(dataset, "vector_format", "dense") or "dense"
+            if vector_format == "sparse":
+                # SparseBruteBackend 直接消费 CSR，其它后端无法处理稀疏向量
+                if record.backend != "sparse-brute":
+                    raise RuntimeError(
+                        f"vector_format=sparse 仅支持 sparse-brute 后端，实际 {record.backend}"
+                    )
+                vectors = sp.load_npz(dataset.vectors_path)
+                if vectors.dtype != np.float32:
+                    vectors = vectors.astype(np.float32, copy=False)
+            else:
+                vectors = np.load(dataset.vectors_path).astype(np.float32, copy=False)
             backend = create_backend(record.backend, dataset.vector_dim, record.metric)
             params = dict(record.params or {})
 

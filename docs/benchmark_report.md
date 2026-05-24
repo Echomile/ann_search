@@ -556,3 +556,101 @@ ANN 算法评估的业界标准做法是绘制 **recall-QPS 帕累托曲线**：
 - 升级硬件 / 换数据集后帕累托前沿如何漂移
 
 详见前端"参数扫描"Tab 的交互式可视化。
+
+## 8. 稀疏感知 ANN: SparseBruteBackend vs 稠密后端对比
+
+### 8.1 背景与动机
+
+单细胞 RNA-seq 表达矩阵天然稀疏：每个 cell 中约 **90%+ 基因表达为 0**。
+常规 pipeline 把基因维度先用 PCA 降到 30~50 维稠密向量再做 ANN 检索，工程上
+轻量、易用，但有两类信号会被 PCA 平滑掉：
+
+1. **稀有细胞类型的 marker 基因**：单个 marker 基因在极少数 cell 上强表达，
+   PCA 把这种"低频高幅"信号压缩到次要主成分里，做近邻时区分度下降。
+2. **细胞身份的稀疏组合特征**：两个相似细胞共同表达的少数几个高变基因，
+   在原始空间是低维子流形上的重合，PCA 投影后会被其它细胞的总体方差稀释。
+
+为此我们引入 **SparseBruteBackend** 作为对照组：跳过 PCA，直接在 ``HVG`` 选出的
+top-5000 高变基因 × N cells 的稀疏矩阵上做精确最近邻；底库以
+:class:`scipy.sparse.csr_matrix` 形式落盘 ``.npz``，距离计算通过稀疏-稠密点积
+``self._sparse_vectors @ query.T`` 自动走 BLAS。
+
+本章对比 `liver` 数据集两种向量化策略：
+
+| 配置 | 向量来源 | 维度 | 后端 |
+| --- | --- | ---: | --- |
+| A. PCA 30D + Brute | scanpy PCA(n_comps=30) | 30 | BruteBackend (l2) |
+| B. HVG 5000 + SparseBrute | scanpy HVG(n_top_genes=5000) raw + log1p + normalize_total | ≤5000 | SparseBruteBackend (l2) |
+
+### 8.2 实验配置
+
+| 项目 | 取值 |
+| --- | --- |
+| 数据集 | liver.h5ad (~30000 cells, 后过滤 ~28000) |
+| query_count | 200 (从底库随机抽样) |
+| top_k | 10 |
+| 距离度量 | l2 |
+| 随机种子 | 42 |
+| 测试机 | macOS arm64, 10 核 |
+| ground truth | A 配置的 BruteBackend 结果 (PCA 30D 空间) |
+
+### 8.3 结果（占位，待真实数据回填）
+
+> ⚠️ 待 `POST /api/v1/datasets/{id}/preprocess?vector_source=raw_sparse` 与
+> `POST /api/v1/indexes` (backend=sparse-brute) 跑通后由
+> `scripts/sweep_offline.py` 生成的 JSON 注入。
+
+| 配置 | 维度 | 稀疏度 | 内存 (MB) | Recall@10 | p50 latency (ms) | QPS (c=1) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A. BruteBackend + PCA 30D | 30 | 0% | XX | 1.00\* | X.XX | XXX |
+| B. SparseBruteBackend + 5000 HVG | ≤5000 | ~92% | XX | X.XX | X.XX | XXX |
+
+\* 配置 A 在 PCA 30D 空间作为 ground truth，Recall@10 定义为 1.0；
+配置 B 的 Recall@10 = (B 的 top-10 ∩ A 的 top-10) / 10，即在 cell ID 维度上
+评估两套向量化策略召回邻居的重合程度（**不是稀疏空间内部召回率**）。
+
+### 8.4 内存分析（理论估计）
+
+设 `N = 28000` cells、`D_pca = 30`、`D_hvg = 5000`、稀疏度 `s = 0.92`。
+
+- 配置 A 稠密：`28000 × 30 × 4 bytes ≈ 3.36 MB`
+- 配置 B 稀疏 CSR：
+  - `data`: `(1 - s) × N × D_hvg × 4 = 0.08 × 28000 × 5000 × 4 ≈ 44.8 MB`
+  - `indices`: 同 nnz 数量 × 4 字节 ≈ 44.8 MB
+  - `indptr`: `(N + 1) × 4 = 0.11 MB`
+  - 合计 ≈ **89.7 MB**（约 27× PCA）
+- 配置 B 若强行存稠密：`28000 × 5000 × 4 ≈ 533 MB`（不可接受）
+
+结论：稀疏存储让 5000 维 HVG 矩阵从 **533 MB → 90 MB**（约 6× 压缩），
+代价是仍然比 PCA 30D 多用 27×，换取的是后文 8.5 的语义增益。
+
+### 8.5 适用场景判断
+
+`SparseBruteBackend` 不是为了替代 HNSW / IVF-PQ 做通用大规模检索，而是
+**"算法对照组 + 稀疏数据上的精确基线"**：
+
+1. **稀有细胞类型识别**：希望 top-K 包含 marker 基因稀疏表达的子群时，
+   原始 HVG 空间比 PCA 空间更敏感。
+2. **跨数据集 marker 对比**：两份 h5ad 用同一份 HVG 词表后，cosine 距离
+   可以直接对比基因表达模式而无需重新拟合 PCA。
+3. **小规模子集精排**：在前级 HNSW 召回 top-1000 后，用 SparseBrute 在
+   稀疏 HVG 空间精排前 100，作为 v1.3 的两阶段检索原型。
+
+不适用场景：
+
+- **N > 200k**：稀疏-稠密点积仍是 O(N × nnz_per_row) 复杂度，不可扩展；
+  需 SPLADE / pyserini 等专门的稀疏倒排索引。
+- **dim > 20000**：CSR ``data`` / ``indices`` 体积线性增长，落盘和读取成本变高。
+
+### 8.6 工程交付
+
+- 后端工厂新增 `sparse-brute`（`app/services/ann/factory.py`）；
+- 数据集表新增 `vector_format` 字段（`dense` / `sparse`），alembic 迁移
+  `0003_v1_2_dataset_vector_format`；
+- 预处理新模式 `raw_sparse`：`preprocess_h5ad(..., vector_source="raw_sparse")`
+  跳过 PCA，做 `normalize_total + log1p + HVG(5000)` 后落盘 `vectors.npz`；
+- 索引构建 `app/tasks/index_task.py` 按 `dataset.vector_format` 自动选择
+  `np.load` / `scipy.sparse.load_npz`；
+- 单元测试 4+2 项（`test_sparse_brute_*`）验证 build/search/save-load/memory
+  以及与 BruteBackend 的 top-K 等价性。
+
