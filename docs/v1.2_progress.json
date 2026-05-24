@@ -1,0 +1,104 @@
+{
+  "version_target": "v1.2.0",
+  "branch": "feat/v1.2-bonus",
+  "baseline_tag": "v1.1.0",
+  "started_at": "2026-05-24T11:40:00+08:00",
+  "milestones": [
+    {
+      "id": "M1",
+      "name": "性能呈现升级",
+      "status": "in_progress",
+      "tag": "v1.2.0-alpha.1",
+      "tasks": [
+        {
+          "id": "M1.C3.backend",
+          "owner": "subagent-M1-alpha",
+          "status": "pending",
+          "desc": "evaluation.param_sweep + sweep_run/sweep_point migration + 3 个 sweep REST 接口 + pytest"
+        },
+        {
+          "id": "M1.D1.backend",
+          "owner": "subagent-M1-beta",
+          "status": "pending",
+          "desc": "POST /search/with_params 透传 runtime_params 接口 + 单测"
+        },
+        {
+          "id": "M1.C3.docs",
+          "owner": "subagent-M1-gamma",
+          "status": "pending",
+          "desc": "benchmark_report.md §6 帕累托章节草稿 + PPT 增量页 markdown 草稿"
+        },
+        {
+          "id": "M1.C3.frontend",
+          "owner": "main-agent",
+          "status": "pending",
+          "desc": "EvaluationPage 新增「参数扫描」Tab + Plotly recall-QPS 散点 + 帕累托前沿"
+        },
+        {
+          "id": "M1.D1.frontend",
+          "owner": "main-agent",
+          "status": "pending",
+          "desc": "参数扫描 Tab 内嵌交互层（滑块 + 散点反查 + 右侧实时 Top-K）"
+        },
+        {
+          "id": "M1.release",
+          "owner": "main-agent",
+          "status": "pending",
+          "desc": "CHANGELOG + README + progress_summary 更新, 打 v1.2.0-alpha.1"
+        }
+      ]
+    },
+    {
+      "id": "M2",
+      "name": "算法可视化 + 单细胞独家性",
+      "status": "pending",
+      "tag": "v1.2.0-alpha.2",
+      "tasks": [
+        {
+          "id": "M2.D2.full",
+          "owner": "subagent-M2-alpha",
+          "status": "pending",
+          "desc": "HnswlibBackend.get_local_subgraph + GET /indexes/{id}/subgraph + IndexGraphPage.tsx"
+        },
+        {
+          "id": "M2.C5.full",
+          "owner": "subagent-M2-beta",
+          "status": "pending",
+          "desc": "SparseBruteBackend + 工厂注册 + dataset.vector_format migration + preprocess raw_sparse + benchmark §7"
+        },
+        {
+          "id": "M2.release",
+          "owner": "main-agent",
+          "status": "pending",
+          "desc": "PPT 加 HNSW 图 + 稀疏页, 视频补录, 打 v1.2.0-alpha.2"
+        }
+      ]
+    },
+    {
+      "id": "M3",
+      "name": "跨数据集深度 + Agent 升级",
+      "status": "pending",
+      "tag": "v1.2.0",
+      "tasks": [
+        {
+          "id": "M3.D7.full",
+          "owner": "subagent-M3-alpha",
+          "status": "pending",
+          "desc": "alignment.py (intersect_only + harmony) + POST /datasets/align + multi-dataset 改用 aligned 索引 + benchmark §8"
+        },
+        {
+          "id": "M3.D4.full",
+          "owner": "subagent-M3-beta",
+          "status": "pending",
+          "desc": "rag.py 重构为 tool calling Agent + 工具 schema + 4 个 LLM client 适配 + RagChatPage 气泡 UI + rag_session/rag_message migration"
+        },
+        {
+          "id": "M3.release",
+          "owner": "main-agent",
+          "status": "pending",
+          "desc": "v1.2.0 正式 release: tag + CHANGELOG + 演示视频终版 + PPT 总量更新"
+        }
+      ]
+    }
+  ]
+}
