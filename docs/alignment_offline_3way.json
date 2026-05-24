@@ -1,0 +1,52 @@
+{
+  "n_total": 69032,
+  "dim": 30,
+  "n_splits": 3,
+  "split_sizes": [
+    23011,
+    23011,
+    23010
+  ],
+  "queries": 100,
+  "top_k": 10,
+  "metric": "l2",
+  "seed": 42,
+  "ef_search": 128,
+  "data_source": "real:backend/data/processed/3/vectors.npy",
+  "platform": {
+    "system": "macOS-26.5-arm64-arm-64bit",
+    "machine": "arm64",
+    "python": "3.12.13",
+    "numpy": "2.4.6"
+  },
+  "ground_truth": {
+    "cross_dataset_coverage": 2.95,
+    "note": "brute on full library, 表征真实近邻天然的 split 分布"
+  },
+  "strategies": {
+    "baseline_minmax": {
+      "description": "各 split 独立 PCA+whitening 后各自 hnswlib + min-max 距离归一化合并",
+      "recall_at_k": 0.47100000000000003,
+      "cross_dataset_coverage": 3.0,
+      "p50_ms": 0.12177100870758295,
+      "p95_ms": 0.16401216853410003,
+      "p99_ms": 0.32038558274507584,
+      "qps": 7690.31115029927,
+      "mem_mb": 16.32684326171875
+    },
+    "intersect_only": {
+      "description": "拼接所有 split 后跑统一 PCA + hnswlib 单库查询",
+      "recall_at_k": 1.0,
+      "cross_dataset_coverage": 2.95,
+      "p50_ms": 0.03741704858839512,
+      "p95_ms": 0.05627466598525642,
+      "p99_ms": 0.07992564816959213,
+      "qps": 24969.56855570788,
+      "mem_mb": 16.32684326171875
+    },
+    "harmony": {
+      "status": "skipped",
+      "reason": "harmonypy not installed in current environment"
+    }
+  }
+}
