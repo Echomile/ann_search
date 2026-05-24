@@ -24,13 +24,15 @@
 </p>
 
 <p align="center">
-  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (2'42")</a>
+  <a href="docs/video/demo_final.mp4">▶ 观看演示视频 (7'42")</a>
   &nbsp;·&nbsp;
   <a href="docs/slides/answer_defense.pdf">查看答辩 PPT (25 张)</a>
   &nbsp;·&nbsp;
   <a href="docs/benchmark_report.md">性能基准报告</a>
   &nbsp;·&nbsp;
   <a href="CHANGELOG.md">v1.1.0 更新日志</a>
+  &nbsp;·&nbsp;
+  <a href="docs/progress_summary.md">进展总结</a>
   &nbsp;·&nbsp;
   <a href="submission/MANIFEST.md">提交物清单</a>
 </p>
@@ -247,7 +249,7 @@ uv run arq app.tasks.worker.WorkerSettings
 
 ## 演示资源
 
-- **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（2 分 42 秒，1440×900，自动化 Playwright 录制 + macOS Tingting 中文配音）。
+- **演示视频**：[`docs/video/demo_final.mp4`](docs/video/demo_final.mp4)（**7 分 42 秒**，1440×900，自动化 Playwright 录制 + macOS Tingting 中文配音；v1.1 v2 版含 admin / SearchLog Dashboard / IndexDetail / SSE+ensemble 新检索 Tab 共 15 段）。
 - **答辩 PPT**：[`docs/slides/answer_defense.pdf`](docs/slides/answer_defense.pdf) · [`.pptx`](docs/slides/answer_defense.pptx)（**25 张**幻灯片，含 v1.1 演进 4 张专题页；Marp Markdown 一键生成）。
 - **配音讲稿**：[`docs/slides/speaker_notes.md`](docs/slides/speaker_notes.md)
 - **端到端测试脚本**：[`e2e/test_liver_e2e.py`](e2e/test_liver_e2e.py)（注入 1.3 GB liver.h5ad 全流程验证） · [`e2e/demo_video.py`](e2e/demo_video.py)（视频自动录制）
@@ -370,7 +372,7 @@ A：告诉 Cursor agent "stop polish loop" 或者手动 `pkill -f 'AGENT_LOOP_TI
 | API 接口文档（31+ 接口） | [`docs/06_API接口文档.md`](docs/06_API接口文档.md) | ✅ |
 | 性能基准报告（含 N=100k） | [`docs/benchmark_report.md`](docs/benchmark_report.md) | ✅ |
 | 答辩 PPT (PDF/PPTX, 25 张) | [`docs/slides/`](docs/slides/) | ✅ |
-| 演示视频 (2'42") | [`docs/video/demo_final.mp4`](docs/video/demo_final.mp4) | ✅ |
+| 演示视频 (7'42") | [`docs/video/demo_final.mp4`](docs/video/demo_final.mp4) | ✅ |
 | 端到端测试 (5 个 Playwright 脚本) | [`e2e/`](e2e/) | ✅ |
 | CI/CD | [`.github/workflows/ci.yml`](.github/workflows/ci.yml) | ✅ |
 | 更新日志 (v1.0.0 / v1.1.0) | [`CHANGELOG.md`](CHANGELOG.md) | ✅ |

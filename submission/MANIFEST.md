@@ -17,7 +17,7 @@
 | 版本 | 日期 | 概要 | 关键产出 |
 | --- | --- | --- | --- |
 | **v1.0.0** | 2026-05-23 | 课程要求 + 三项加分项首版交付 | 21 接口 / 21 张 PPT / 9 张截图 / 5'54" 演示视频草稿 |
-| **v1.1.0** | 2026-05-24 | feat + perf + polish 平衡升级 | **31+ 接口 / 25 张 PPT / 14 张截图 / 2'42" 演示视频 / 6 张架构图 / 76 pytest + 42 vitest** |
+| **v1.1.0** | 2026-05-24 | feat + perf + polish 平衡升级 | **31+ 接口 / 25 张 PPT / 14 张截图 / 7'42" 演示视频 / 6 张架构图 / 76 pytest + 42 vitest** |
 
 ---
 
@@ -45,6 +45,7 @@
 | 6 | API 接口文档（**31+** 接口） | [`docs/06_API接口文档.md`](../docs/06_API接口文档.md) |
 | 7 | 性能基准实验报告（含 N=100k 大规模实测） | [`docs/benchmark_report.md`](../docs/benchmark_report.md) |
 | 8 | 更新日志（v1.0.0 + v1.1.0） | [`CHANGELOG.md`](../CHANGELOG.md) |
+| 9 | 进展总结（v1.0.0 → v1.1.0 单一信息源） | [`docs/progress_summary.md`](../docs/progress_summary.md) |
 
 ### 2.1 架构图（v1.1.0 新增 A1）
 
@@ -72,7 +73,7 @@
 
 | 文件 | 时长 | 分辨率 | 说明 |
 | --- | ---: | --- | --- |
-| [`docs/video/demo_final.mp4`](../docs/video/demo_final.mp4) | 2'42" | 1440×900 | H.264 + AAC · 11 段中文配音 · Playwright 自动驱动浏览器全流程（含登录 / 上传 / 索引 / 检索 / 可视化 / 评测 / RAG） |
+| [`docs/video/demo_final.mp4`](../docs/video/demo_final.mp4) | **7'42"** | 1440×900 | H.264 + AAC · **15 段中文配音** · Playwright 自动驱动浏览器全流程（v1.1 v2：含登录 / 上传 / 索引 / 检索 / 可视化 / 评测 / RAG / **admin / SearchLog Dashboard / IndexDetail / SSE+ensemble 新 Tab**） |
 
 录制脚本：[`e2e/demo_video.py`](../e2e/demo_video.py)，可一键重新生成。
 
