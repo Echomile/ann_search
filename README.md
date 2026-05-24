@@ -3,11 +3,11 @@
 > 软件工程课程大作业 · 面向单细胞测序数据的可视化 ANN 检索平台。
 
 <p align="center">
-  <img src="https://img.shields.io/badge/release-v1.2.0--alpha.2-blueviolet?logo=git" alt="Release"/>
+  <img src="https://img.shields.io/badge/release-v1.2.0-success?logo=git" alt="Release"/>
   <img src="https://img.shields.io/badge/CI-passing-brightgreen?logo=github" alt="CI"/>
-  <img src="https://img.shields.io/badge/pytest-96%2F96%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
+  <img src="https://img.shields.io/badge/pytest-110%2F110%20passed-brightgreen?logo=pytest" alt="Backend Tests"/>
   <img src="https://img.shields.io/badge/vitest-42%2F42%20passed-brightgreen?logo=vitest" alt="Frontend Tests"/>
-  <img src="https://img.shields.io/badge/REST_API-36%2B-009688?logo=fastapi" alt="API"/>
+  <img src="https://img.shields.io/badge/REST_API-45%2B-009688?logo=fastapi" alt="API"/>
   <img src="https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/FastAPI-0.118%2B-009688?logo=fastapi&logoColor=white" alt="FastAPI"/>
   <img src="https://img.shields.io/badge/React-18.3-61dafb?logo=react&logoColor=white" alt="React"/>
@@ -199,16 +199,16 @@ cd backend
 uv run arq app.tasks.worker.WorkerSettings
 ```
 
-## 加分功能（v1.0.0 三项 + v1.1.0 八项 + v1.2.0-alpha.2 四项）
+## 加分功能（v1.0.0 三项 + v1.1.0 八项 + v1.2.0 六项 = 17 项累计）
 
-### v1.2.0-alpha.2 加分项（M1 + M2 已完成 4 项）
+### v1.2.0 加分项（路线图 6 项全部完成）
 
 - **C3 · recall-QPS 帕累托曲线**：`POST /api/v1/evaluation/sweep` 同步扫描 backend × ef_search/nprobe 网格，产出 (recall, qps, p50, p95, mem) 数据点，`_mark_pareto()` 标记前沿。前端「参数扫描」Tab 用 Plotly 散点画 ANN-Benchmarks 风格曲线。已用 liver PCA 真实数据跑出 25 数据点（5 帕累托前沿），见 [`docs/benchmark_report.md`](docs/benchmark_report.md) §7 + [`docs/assets/benchmark/pareto_pca30.png`](docs/assets/benchmark/pareto_pca30.png)。
 - **D1 · 交互式参数仪表盘**：`POST /api/v1/search/with_params` 在不重建索引的前提下透传 `runtime_params`（`ef_search` / `nprobe`），返回 `effective_params` + `ignored_params`。前端三栏布局：滑块 / 选中点详情 / 实时 Top-K 预览，散点点击反查回滑块。
 - **D2 · HNSW 邻居图可视化**：`GET /api/v1/indexes/{id}/subgraph` 暴露 hnswlib 内部邻接表，BFS 展开 depth 跳子图。前端 [`IndexGraphPage.tsx`](frontend/src/pages/IndexGraphPage.tsx) 用 Plotly 渲染节点+边，查询起点红五角星，按 depth 着色，提供 depth/layer 控件。让 HNSW「小世界图」概念可见可触。
 - **C5 · 稀疏感知 ANN**：`SparseBruteBackend` 基于 `scipy.sparse.csr_matrix` 实现稀疏-稠密点积，支持单细胞 HVG 5000 维直接检索（跳过 PCA）。`Dataset.vector_format = dense|sparse`，预处理新模式 `raw_sparse` 保存 `.npz` 落盘，工厂注册 `sparse-brute` 后端。
-
-剩余 2 项 M3 加分点（D7 跨数据集语义对齐 / D4 LLM Function Calling RAG）见 [`docs/v1.2_progress.json`](docs/v1.2_progress.json)，subagent 进行中。
+- **D7 · 跨数据集语义对齐**：`POST /api/v1/datasets/align` 同步触发跨数据集对齐，支持 `intersect_only`（基因集交集 + 重新 PCA）+ `harmony`（可选，harmonypy 缺失降级）两种策略。AlignedDataset 视为虚拟数据集，对齐后向量落盘到 `data/aligned/{id}/`，multi-dataset 检索新增 `aligned_dataset_id` 参数走对齐空间单库路径。
+- **D4 · LLM Function Calling RAG Agent**：把 v1.1 三段式 `parse → search → summarize` 升级为 LLM 自主决定的 Agent 风格。5 个工具（`search_by_cell_id / search_by_vector / list_datasets / filter_cells / summarize_results`），4 个 LLM client 全部增加 `chat_with_tools()` 方法。`RagSession / RagMessage` 多轮持久化，前端 RagChatPage 重构为 ChatGPT 风格气泡 + 工具调用状态条 + 引用追溯面板。
 
 ### v1.0.0 课程要求加分项（三项全做）
 

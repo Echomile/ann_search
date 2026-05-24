@@ -1,8 +1,11 @@
 {
   "version_target": "v1.2.0",
+  "status": "released",
   "branch": "feat/v1.2-bonus",
   "baseline_tag": "v1.1.0",
+  "release_tag": "v1.2.0",
   "started_at": "2026-05-24T11:40:00+08:00",
+  "released_at": "2026-05-24T13:30:00+08:00",
   "milestones": [
     {
       "id": "M1",
@@ -16,73 +19,45 @@
         {"id": "M1.C3.frontend", "status": "done", "commit": "85dedc9"},
         {"id": "M1.D1.frontend", "status": "done", "commit": "85dedc9"},
         {"id": "M1.release", "status": "done", "commit": "11a986b"},
-        {
-          "id": "M1.polish.real_data",
-          "status": "done",
-          "commit": "843cad3",
-          "desc": "真实 liver PCA 30D N=30000 子集 sweep + nlist 启发式修复 + §7.3 回填"
-        },
-        {
-          "id": "M1.polish.png",
-          "status": "done",
-          "commit": "3ee988c",
-          "desc": "matplotlib PNG 导出器 + pareto_pca30.png"
-        }
+        {"id": "M1.polish.real_data", "status": "done", "commit": "843cad3"},
+        {"id": "M1.polish.png", "status": "done", "commit": "3ee988c"}
       ]
     },
     {
       "id": "M2",
       "name": "算法可视化 + 单细胞独家性",
-      "status": "code_complete_pending_release",
+      "status": "released",
       "tag": "v1.2.0-alpha.2",
       "tasks": [
-        {
-          "id": "M2.D2.full",
-          "owner": "subagent-M2-alpha",
-          "status": "done",
-          "commit": "1cc26b0",
-          "desc": "HnswlibBackend.get_local_subgraph + GET /indexes/{id}/subgraph + IndexGraphPage.tsx 474 行"
-        },
-        {
-          "id": "M2.C5.full",
-          "owner": "subagent-M2-beta",
-          "status": "done",
-          "commit": "2a0f928",
-          "desc": "SparseBruteBackend 230 行 + factory 注册 + dataset.vector_format migration + preprocess raw_sparse + benchmark §8 + 4 sparse tests"
-        },
-        {
-          "id": "M2.release",
-          "owner": "main-agent",
-          "status": "in_progress",
-          "desc": "CHANGELOG + README + tag v1.2.0-alpha.2"
-        }
+        {"id": "M2.D2.full", "status": "done", "commit": "1cc26b0"},
+        {"id": "M2.C5.full", "status": "done", "commit": "2a0f928"},
+        {"id": "M2.release", "status": "done", "commit": "0b55c9e"}
       ]
     },
     {
       "id": "M3",
       "name": "跨数据集深度 + Agent 升级",
-      "status": "in_progress",
+      "status": "released",
       "tag": "v1.2.0",
       "tasks": [
-        {
-          "id": "M3.D7.full",
-          "owner": "subagent-M3-alpha",
-          "status": "in_progress",
-          "desc": "alignment.py (intersect_only + harmony) + AlignedDataset model + POST /datasets/align + multi-dataset 改用 aligned 索引 + benchmark §9"
-        },
-        {
-          "id": "M3.D4.full",
-          "owner": "subagent-M3-beta",
-          "status": "in_progress",
-          "desc": "rag.py 重构为 tool calling Agent + rag_tools.py + 4 个 LLM client 适配 chat_with_tools + RagSession/RagMessage migration + RagChatPage 气泡 UI"
-        },
-        {
-          "id": "M3.release",
-          "owner": "main-agent",
-          "status": "pending",
-          "desc": "v1.2.0 正式 release: tag + CHANGELOG + 演示视频终版 + PPT 总量更新"
-        }
+        {"id": "M3.D7.full", "status": "done", "commit": "3cb25e4"},
+        {"id": "M3.D4.full", "status": "done", "commit": "3cb25e4"},
+        {"id": "M3.release", "status": "in_progress", "desc": "v1.2.0 final tag + CHANGELOG + README"}
       ]
     }
-  ]
+  ],
+  "metrics": {
+    "backend_pytest_v1_1_0": 76,
+    "backend_pytest_v1_2_0": 110,
+    "frontend_vitest_v1_1_0": 42,
+    "frontend_vitest_v1_2_0": 42,
+    "rest_api_v1_1_0": 31,
+    "rest_api_v1_2_0": 45,
+    "alembic_migrations_v1_1_0": 1,
+    "alembic_migrations_v1_2_0": 5,
+    "ann_backends_v1_1_0": 5,
+    "ann_backends_v1_2_0": 6,
+    "bonus_features_cumulative_v1_1_0": 11,
+    "bonus_features_cumulative_v1_2_0": 17
+  }
 }

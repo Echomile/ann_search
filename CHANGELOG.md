@@ -3,6 +3,63 @@
 本项目遵循 [约定式提交 (Conventional Commits)](https://www.conventionalcommits.org/zh-hans/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v1.2.0] - 2026-05-24
+
+v1.2.0 正式版本：**v1.1.0 之后的 v1.2 路线图 6 项加分功能全部交付**（C3 + D1 + D2 + C5 + D7 + D4），分 M1 / M2 / M3 三个 milestone 推进；总计 9 个语义化 commit（含 4 个 feat / 1 fix / 2 feat-scripts / 2 docs-release），通过 Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 个 subagent 并行）+ 全程 `/loop 5m` 后台 polish 监督。
+
+### 新功能 Features (v1.2.0-alpha.2 → v1.2.0)
+
+#### v1.2 加分项 D7 · 跨数据集语义对齐
+
+- **feat(m3) D7**：单纯把多 dataset 各自查 + min-max 重排（v1.0/v1.1 实现）升级为对齐到统一向量空间后单库检索（commit `3cb25e4`）。
+- 新增服务 `align_datasets()` 实现 `intersect_only`（取基因集交集 + 在统一空间重新 PCA target_dim 维）与 `harmony`（可选，harmonypy 缺失时降级 intersect_only）两种策略。
+- 新增 `AlignedDataset` ORM + `0004_v1_2_aligned_datasets` migration（`source_dataset_ids_json / method / target_dim / cell_count / common_genes_count / vectors_path / cell_map_path / status / created_by`）。
+- 新增 4 个 REST 接口：`POST /api/v1/datasets/align`（同步触发对齐）+ `GET /aligned`（列表）+ `GET /aligned/{id}`（详情）+ `DELETE /aligned/{id}`。
+- `search.py` multi-dataset 路径新增 `aligned_dataset_id` 参数：提供时在对齐空间单库检索（更简单且向量空间一致），不提供保持现有兼容路径。
+- 前端：`DatasetsPage` 加「对齐」按钮（多选 dataset 后激活），`SearchPage` multi-dataset Tab 增加 aligned toggle，`alignmentApi` 4 个方法 + `AlignedDataset / AlignRequest` 类型。
+- 文档：`docs/benchmark_report.md` §9 新增「跨数据集语义对齐：intersect_only vs 各自检索对比」。
+
+#### v1.2 加分项 D4 · LLM Function Calling RAG Agent
+
+- **feat(m3) D4**：把 v1.1 RAG 三段式 `parse → search → summarize` 固定流程 + 规则解析升级为 LLM 自主决定的 Agent 风格（commit `3cb25e4`）。
+- 新增 `services/rag_tools.py` 含 5 个工具 schema：`search_by_cell_id / search_by_vector / list_datasets / filter_cells / summarize_results`，OpenAI / Anthropic 通用格式。
+- `services/rag.py` 重构 `chat_with_tools` Agent loop：多轮 `tool_call → tool_result` 直到 `finish_reason=stop`，`max_iterations=5` 安全上限。
+- 4 个 LLM client（`mock / openai / dashscope / anthropic`）都增加 `chat_with_tools()` 方法，统一返回 `ChatResponse(finish_reason, tool_calls, content)`；mock client 用规则模拟 tool_call 保证零依赖 e2e 可跑。
+- 新增 `RagSession / RagMessage` ORM + `0005_v1_2_rag_sessions` migration（含 `role / content / tool_calls_json / tool_results_json / cascade delete`）。
+- 改造 `POST /api/v1/rag/query` 支持 `session_id` 多轮，新增 `GET /api/v1/rag/sessions/{id}` 拉取历史；响应含 `answer + tool_trace + citations`（引用追溯）。
+- 前端 `RagChatPage.tsx` 完全重构为 ChatGPT 风格气泡对话：用户右侧蓝色，AI 左侧灰色，AI 调用工具时显示「正在搜索...」状态条，每条 AI 回答下方有「引用」折叠面板（hits 表格），输入框 Enter 发送。
+
+### 工程指标 (v1.1.0 → v1.2.0)
+
+| 维度 | v1.1.0 | v1.2.0 | 增量 | 增长 |
+| --- | ---: | ---: | --- | --- |
+| 后端 pytest | 76 | **110** | +34 | +45% |
+| 前端 vitest | 42 | 42 | 0 | — |
+| REST 接口 | 31+ | **45+** | +14 | +45% |
+| Alembic 迁移版本 | 1 | **5** | +4 | +400% |
+| ANN 后端数量 | 5 | **6** | +1 (sparse-brute) | +20% |
+| 前端页面 | 9 | **10** | +1 (IndexGraphPage) | — |
+| LLM client 工具 | 4 (无 tool calling) | **4 + Function Calling** | Agent 升级 | — |
+| 文档章节 (benchmark) | §5.7 | **§9** | +§7/§8/§9 三个新章节 | — |
+| 加分项数 (累计) | 11 | **17** | +6 | C3/D1/D2/C5/D7/D4 |
+
+### v1.2.0 路线图完整完成情况
+
+| Milestone | 加分项 | 状态 | tag |
+| --- | --- | --- | --- |
+| M1 性能呈现升级 | C3 recall-QPS 帕累托 + D1 交互式仪表盘 | done | v1.2.0-alpha.1 |
+| M2 算法可视化 + 单细胞独家性 | D2 HNSW 图可视化 + C5 稀疏感知 ANN | done | v1.2.0-alpha.2 |
+| M3 跨数据集深度 + Agent 升级 | D7 跨数据集对齐 + D4 LLM Function Calling | done | **v1.2.0** |
+
+### 后续 polish 待办（可选）
+
+- 跑真实多数据集对齐 e2e 验证 + 回填 `docs/benchmark_report.md` §9 占位。
+- 录 v1.2 演示视频补段（参数仪表盘 + HNSW 图 + 稀疏对比 + 对齐 + Agent 对话）。
+- 答辩 PPT v3 增加 v1.2 演进 6 张专题页。
+- SweepTab / IndexGraphPage / RagChatPage 前端 vitest 单测补齐。
+
+[v1.2.0]: https://github.com/aokimi/ann_search/releases/tag/v1.2.0
+
 ## [v1.2.0-alpha.2] - 2026-05-24
 
 v1.2.0-alpha.1 之后的 **M2 算法可视化 + 单细胞独家性**：2 个大型 feature commit（D2 + C5），新增 1 个 REST 接口（subgraph）+ 1 张新表（datasets.vector_format）+ 1 个新 ANN 后端（sparse-brute）+ 1 个新前端页面（IndexGraphPage）+ 1 个新章节（§8 稀疏对比）。
