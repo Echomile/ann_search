@@ -20,8 +20,8 @@ from app.services.ann.brute_backend import BruteBackend
 from app.services.evaluation import (
     benchmark_index,
     compute_recall,
-    compute_search_log_stats,
 )
+from app.services.stats import compute_search_stats
 
 
 def test_compute_recall_full_match() -> None:
@@ -166,7 +166,7 @@ async def test_search_log_stats_empty(stats_session: AsyncSession) -> None:
     user = await _make_user(stats_session, "empty_user")
     user_id = int(user.id)
 
-    result = await compute_search_log_stats(stats_session, user_id=user_id)
+    result = await compute_search_stats(stats_session, user_id=user_id)
 
     assert result["total_queries"] == 0
     assert result["overall_avg_latency_ms"] == 0.0
@@ -219,7 +219,7 @@ async def test_search_log_stats_with_data(stats_session: AsyncSession) -> None:
     )
     await stats_session.commit()
 
-    result = await compute_search_log_stats(stats_session, user_id=user_id)
+    result = await compute_search_stats(stats_session, user_id=user_id)
 
     assert result["total_queries"] == 3
     assert result["overall_avg_latency_ms"] == pytest.approx((10.0 + 20.0 + 120.0) / 3)
@@ -243,6 +243,6 @@ async def test_search_log_stats_with_data(stats_session: AsyncSession) -> None:
     # 当前桶覆盖 [now-1h, now]，应包含 now 和 now-5min 两条
     assert result["hourly_24h"][-1]["queries"] == 2
 
-    only_a = await compute_search_log_stats(stats_session, user_id=user_id, dataset_id=ds_a_id)
+    only_a = await compute_search_stats(stats_session, user_id=user_id, dataset_id=ds_a_id)
     assert only_a["total_queries"] == 2
     assert {b["dataset_id"] for b in only_a["by_dataset"]} == {ds_a_id}

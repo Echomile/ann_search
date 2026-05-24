@@ -18,15 +18,6 @@ export const authApi = {
     const { data } = await httpClient.post<User>('/auth/register', payload);
     return data;
   },
-
-  me: async (): Promise<User> => {
-    const { data } = await httpClient.get<User>('/auth/me');
-    return data;
-  },
-
-  logout: async (): Promise<void> => {
-    await httpClient.post('/auth/logout');
-  },
 };
 
 // 管理员-用户管理 API（与后端 /api/v1/admin/users 对齐）

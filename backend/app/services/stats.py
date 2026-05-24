@@ -141,7 +141,9 @@ async def compute_search_stats(
 
     # 滚动 24 小时窗口：以当前时刻为锚点，向前 24 个 1 小时桶，最后一个桶 [now-1h, now]
     # 这样跨整点不会丢失数据，更符合"最近 24 小时"语义。
-    now = datetime.now(tz=UTC).replace(microsecond=0)
+    # 注意：不在此处截断 microsecond，否则刚写入的事件（created_at 微秒 > 0）会被
+    # ``created_at > now`` 误判为未来时间戳而漏统计；hour_iso 的对齐由 _format_hour_iso 负责。
+    now = datetime.now(tz=UTC)
     start_time = now - timedelta(hours=24)
     hourly_counts: list[int] = [0] * 24
     hourly_latencies: list[list[float]] = [[] for _ in range(24)]

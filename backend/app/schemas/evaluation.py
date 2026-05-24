@@ -60,36 +60,3 @@ class BenchmarkTaskHandle(BaseModel):
     task_id: str = Field(..., description="ARQ 任务 ID，可用于结果查询")
     index_id: int = Field(..., description="本次评测的索引 ID")
     status: str = Field("queued", description="任务状态")
-
-
-class SearchLogByDataset(BaseModel):
-    """按数据集聚合的检索日志统计。"""
-
-    dataset_id: int = Field(..., description="数据集 ID")
-    dataset_name: str = Field(..., description="数据集名称，缺失时回退为 ``#ID``")
-    total_queries: int = Field(..., description="该数据集下的检索次数")
-    avg_latency_ms: float = Field(..., description="平均延迟（毫秒）")
-    p95_latency_ms: float = Field(..., description="P95 延迟（毫秒）")
-
-
-class SearchLogHourBucket(BaseModel):
-    """最近 24 小时内单个小时桶的检索统计。"""
-
-    hour_iso: str = Field(..., description="桶起点 ISO 时间戳（UTC, ``Z`` 后缀）")
-    queries: int = Field(..., description="该小时桶内的检索次数")
-    avg_latency_ms: float = Field(..., description="该桶平均延迟（毫秒），无数据为 0")
-
-
-class SearchLogStats(BaseModel):
-    """检索日志聚合统计响应。"""
-
-    total_queries: int = Field(..., description="用户全部检索次数")
-    overall_avg_latency_ms: float = Field(..., description="全部检索平均延迟（毫秒），无数据为 0")
-    overall_p95_latency_ms: float = Field(..., description="P95 延迟（毫秒），无数据为 0")
-    by_dataset: list[SearchLogByDataset] = Field(
-        default_factory=list, description="按数据集分组的检索统计"
-    )
-    hourly_24h: list[SearchLogHourBucket] = Field(
-        default_factory=list,
-        description="最近 24h 滚动 1 小时窗口（共 24 桶，数组最后一个为当前桶）",
-    )

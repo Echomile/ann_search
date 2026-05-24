@@ -24,19 +24,7 @@ from app.db.base import Base
 from app.main import app
 from app.services import search_cache
 from app.services.ann.cache import IndexCache
-
-
-class _FakeRedis:
-    """最小 in-memory Redis 替身，配合 monkeypatch 注入 search_cache。"""
-
-    def __init__(self) -> None:
-        self.store: dict[str, str] = {}
-
-    async def set(self, key: str, value: str, ex: int | None = None) -> None:  # noqa: ARG002
-        self.store[key] = value
-
-    async def get(self, key: str) -> str | None:
-        return self.store.get(key)
+from tests.conftest import FakeRedis
 
 
 @pytest_asyncio.fixture
@@ -142,7 +130,7 @@ async def test_cache_stats_reflects_search_cache_activity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """触发 miss → hit 后端点应实时反映 SearchCache 计数与命中率。"""
-    fake = _FakeRedis()
+    fake = FakeRedis()
     monkeypatch.setattr(search_cache, "_get_client", lambda: fake)
 
     async def compute() -> dict[str, Any]:

@@ -8,11 +8,6 @@ export interface AdminUser {
   created_at: string;
 }
 
-/** 后端 `AdminUserUpdate` 请求体，目前仅支持改 `role`。 */
-export interface AdminUserUpdate {
-  role: 'admin' | 'user';
-}
-
 /** 后端 `PasswordResetResponse`：一次性返回明文新密码。 */
 export interface PasswordResetResponse {
   user_id: number;

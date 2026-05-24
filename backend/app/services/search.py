@@ -287,7 +287,9 @@ def get_index_backend(
     try:
         from app.services.ann.cache import IndexCache
 
-        return IndexCache.get(index_id)
+        cached = IndexCache.instance().peek(index_id)
+        if cached is not None:
+            return cached
     except Exception as exc:  # noqa: BLE001
         logger.debug("IndexCache 不可用，降级到直接加载: %s", exc)
 

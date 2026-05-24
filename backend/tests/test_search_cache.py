@@ -1,6 +1,7 @@
 """F2 search_cache 单测。
 
 不依赖真实 Redis：通过 monkeypatch 把 ``_get_client`` 替换为 in-memory dict-backed fake。
+``FakeRedis`` 共享自 :mod:`tests.conftest`。
 """
 
 from __future__ import annotations
@@ -12,19 +13,7 @@ import numpy as np
 import pytest
 
 from app.services import search_cache
-
-
-class _FakeRedis:
-    """最小 in-memory Redis 替身，支持 set(..., ex=...) / get。"""
-
-    def __init__(self) -> None:
-        self.store: dict[str, str] = {}
-
-    async def set(self, key: str, value: str, ex: int | None = None) -> None:  # noqa: ARG002
-        self.store[key] = value
-
-    async def get(self, key: str) -> str | None:
-        return self.store.get(key)
+from tests.conftest import FakeRedis
 
 
 @pytest.fixture(autouse=True)
@@ -35,8 +24,9 @@ def reset_metrics() -> None:
 
 
 @pytest.fixture
-def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
-    fake = _FakeRedis()
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> FakeRedis:
+    """注入 in-memory :class:`FakeRedis` 替换 ``_get_client``。"""
+    fake = FakeRedis()
     monkeypatch.setattr(search_cache, "_get_client", lambda: fake)
     return fake
 
@@ -65,7 +55,7 @@ def test_make_cache_key_vector_query() -> None:
     assert a == b
 
 
-def test_cached_or_compute_miss_then_hit(fake_redis: _FakeRedis) -> None:
+def test_cached_or_compute_miss_then_hit(fake_redis: FakeRedis) -> None:
     """首次 miss 触发 compute，二次 hit 直接返回。"""
 
     calls = {"n": 0}

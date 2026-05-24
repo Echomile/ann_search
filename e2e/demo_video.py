@@ -31,9 +31,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from playwright.sync_api import Page, expect, sync_playwright
+from playwright.sync_api import Page, sync_playwright
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conftest import BASE_URL, PASSWORD, USERNAME  # noqa: E402
 from make_video_cards import wrap_with_intro_outro  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -41,10 +42,6 @@ VIDEO_DIR = ROOT / "docs" / "video"
 NARR_DIR = VIDEO_DIR / "narration"
 VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 NARR_DIR.mkdir(parents=True, exist_ok=True)
-
-USERNAME = "demo"
-PASSWORD = "demo1234"
-BASE_URL = "http://localhost:5173"
 
 
 @dataclass

@@ -63,6 +63,26 @@ class IndexCache:
             cls._instance = cls(capacity=capacity)
         return cls._instance
 
+    def peek(self, index_id: int) -> IndexBackend | None:
+        """仅查内存命中：命中返回已加载后端并刷新 LRU，未命中返回 ``None``。
+
+        本方法**不会**触发数据库查询或磁盘加载，是同步调用，供 :func:`get_index_backend`
+        在没有 ``db`` 上下文的场景下做 "命中即用，未命中走 fallback" 的快速路径。
+
+        Args:
+            index_id: 索引 ID。
+
+        Returns:
+            IndexBackend | None: 命中返回实例并累加 ``hits``；未命中返回 ``None``
+            但**不**累加 ``misses``（避免污染指标——只有真正发起加载的路径才算 miss）。
+        """
+        backend = self._cache.get(index_id)
+        if backend is None:
+            return None
+        self._cache.move_to_end(index_id)
+        self._hits += 1
+        return backend
+
     async def get_or_load(self, index_id: int, db: AsyncSession) -> IndexBackend:
         """获取或加载指定索引。
 

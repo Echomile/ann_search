@@ -25,13 +25,12 @@ from pathlib import Path
 
 from playwright.sync_api import Page, expect, sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conftest import BASE_URL, PASSWORD, USERNAME  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 SCREENSHOT_DIR = ROOT / "docs" / "e2e_screenshots"
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
-
-USERNAME = "demo"
-PASSWORD = "demo1234"
-BASE_URL = "http://localhost:5173"
 
 
 def shot(page: Page, name: str, full_page: bool = False) -> None:

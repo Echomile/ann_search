@@ -111,6 +111,54 @@ def _resolve_dataset_dir(dataset: Dataset) -> str:
     )
 
 
+def _load_backend(dataset: Dataset, record: IndexRecord, dataset_dir: str) -> Any:
+    """统一封装 :func:`search_service.get_index_backend` 的调用。
+
+    避免在 6 个路由 / helper 中重复传入相同的 6 个 kwargs；该函数仅做参数装配，
+    不引入额外的副作用，行为与原有 inline 调用完全一致。
+
+    Args:
+        dataset: 已校验的数据集对象，提供 ``vector_dim`` 元信息。
+        record: 已校验为 ``ready`` 状态的索引记录，提供 backend / metric / 路径等元信息。
+        dataset_dir: 数据集制品目录，仅在 IndexCache 未命中时用于兜底加载。
+
+    Returns:
+        Any: 可调用 ``search`` 的 IndexBackend 实例。
+    """
+    return search_service.get_index_backend(
+        index_id=record.id,
+        dataset_dir=dataset_dir,
+        backend_name=record.backend,
+        metric=record.metric,
+        dim=dataset.vector_dim,
+        index_path=record.index_path,
+    )
+
+
+def _to_search_hits(items: list[dict[str, Any]]) -> list[SearchHit]:
+    """把服务层结果字典列表批量包装成 :class:`SearchHit` 列表。
+
+    在 ``search_by_id`` / ``search_by_vector`` / ``search_multi_dataset`` /
+    ``search_batch_endpoint`` 中出现的相同字典→模型映射模板，抽到一处统一维护。
+
+    Args:
+        items: 服务层 ``search_with_backend`` 输出的 ``"results"`` 列表元素。
+
+    Returns:
+        list[SearchHit]: Pydantic 命中模型列表，缺失字段使用安全默认值。
+    """
+    return [
+        SearchHit(
+            rank=item["rank"],
+            cell_id=item["cell_id"],
+            distance=item["distance"],
+            meta=item.get("meta") or {},
+            source_dataset_id=item.get("source_dataset_id"),
+        )
+        for item in items
+    ]
+
+
 async def _log_search(
     db: DbSession,
     *,
@@ -141,16 +189,6 @@ def _build_response(
     top_k: int,
 ) -> SearchResponse:
     """将服务层 dict 输出包装为 :class:`SearchResponse`。"""
-    hits = [
-        SearchHit(
-            rank=item["rank"],
-            cell_id=item["cell_id"],
-            distance=item["distance"],
-            meta=item.get("meta") or {},
-            source_dataset_id=item.get("source_dataset_id"),
-        )
-        for item in payload.get("results", [])
-    ]
     return SearchResponse(
         dataset_id=dataset_id,
         top_k=top_k,
@@ -158,7 +196,7 @@ def _build_response(
         index_backend=payload.get("index_backend"),
         metric=payload.get("metric"),
         total_candidates=payload.get("total_candidates"),
-        hits=hits,
+        hits=_to_search_hits(payload.get("results", [])),
     )
 
 
@@ -180,14 +218,7 @@ async def search_by_id(
     dataset = await _get_dataset(db, payload.dataset_id)
     record = await _get_index_record(db, dataset_id=payload.dataset_id, index_id=payload.index_id)
     dataset_dir = _resolve_dataset_dir(dataset)
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
     try:
         result = await search_service.async_search_by_cell_id(
             query_cell_id=payload.cell_id,
@@ -235,14 +266,7 @@ async def search_by_vector(
             detail=f"向量维度 {len(payload.vector)} 与数据集维度 {dataset.vector_dim} 不一致",
         )
     dataset_dir = _resolve_dataset_dir(dataset)
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
     result = await search_service.async_search_by_vector(
         query_vector=payload.vector,
         dataset_dir=dataset_dir,
@@ -382,14 +406,7 @@ async def search_by_vector_stream(
             detail=f"向量维度 {len(payload.vector)} 与数据集维度 {dataset.vector_dim} 不一致",
         )
     dataset_dir = _resolve_dataset_dir(dataset)
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
     result = await search_service.async_search_by_vector(
         query_vector=payload.vector,
         dataset_dir=dataset_dir,
@@ -490,16 +507,7 @@ async def search_multi_dataset(
         top_k=payload.top_k,
     )
     latency_ms = float(sum(p.get("query_time_ms", 0.0) for p in per_dataset))
-    hits = [
-        SearchHit(
-            rank=item["rank"],
-            cell_id=item["cell_id"],
-            distance=item["distance"],
-            meta=item.get("meta") or {},
-            source_dataset_id=item.get("source_dataset_id"),
-        )
-        for item in merged_hits
-    ]
+    hits = _to_search_hits(merged_hits)
     total_candidates = int(sum(p.get("total_candidates", 0) for p in per_dataset))
     await _log_search(
         db,
@@ -533,14 +541,7 @@ async def _execute_one_multi_search(
 
     本函数刻意不访问数据库，以便外层 :func:`asyncio.gather` 可以安全并发。
     """
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
     return await search_service.async_search_by_vector(
         query_vector=query_vector,
         dataset_dir=dataset_dir,
@@ -602,14 +603,7 @@ async def search_batch_endpoint(
                 )
 
     dataset_dir = _resolve_dataset_dir(dataset)
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
 
     queries: list[tuple[str | None, list[float] | None]] = [
         (item.cell_id, None) if item.cell_id is not None else (None, item.vector)
@@ -642,21 +636,11 @@ async def search_batch_endpoint(
 
     groups: list[BatchSearchHitGroup] = []
     for i, (item, result) in enumerate(zip(payload.queries, per_query, strict=True)):
-        hits = [
-            SearchHit(
-                rank=hit["rank"],
-                cell_id=hit["cell_id"],
-                distance=hit["distance"],
-                meta=hit.get("meta") or {},
-                source_dataset_id=hit.get("source_dataset_id"),
-            )
-            for hit in result.get("results", [])
-        ]
         groups.append(
             BatchSearchHitGroup(
                 query_index=i,
                 query_cell_id=item.cell_id,
-                hits=hits,
+                hits=_to_search_hits(result.get("results", [])),
                 latency_ms=float(result.get("query_time_ms", 0.0)),
                 cache_hit=bool(result.get("cache_hit", False)),
             )
@@ -732,14 +716,7 @@ async def _execute_one_ensemble_search(
     取最终 Top-K。本函数不访问 DB，便于在外层 :func:`asyncio.gather` 中并发。
     ``exclude_cell_id`` 在以 cell_id 发起查询时传入，用于剔除自身命中。
     """
-    backend = search_service.get_index_backend(
-        index_id=record.id,
-        dataset_dir=dataset_dir,
-        backend_name=record.backend,
-        metric=record.metric,
-        dim=dataset.vector_dim,
-        index_path=record.index_path,
-    )
+    backend = _load_backend(dataset, record, dataset_dir)
     return await search_service.async_search_by_vector(
         query_vector=query_vector,
         dataset_dir=dataset_dir,
