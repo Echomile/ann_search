@@ -484,39 +484,45 @@ ANN 算法评估的业界标准做法是绘制 **recall-QPS 帕累托曲线**：
 | 随机种子 | 42 |
 | 测试机 | macOS arm64, 10 核 |
 
-### 7.3 扫描结果（PCA 30D）
+### 7.3 扫描结果（liver PCA 30D, N=30000 子集）
 
-> ⚠️ 占位：实际数据将由 `POST /api/v1/evaluation/sweep` 跑出后回填，此处先列出预期的列结构。
+> 真实数据通过 `backend/scripts/sweep_offline.py --vectors_path backend/data/processed/3/vectors.npy --subset_n 30000 --queries 200 --top_k 10` 跑出，原始 JSON 保存在 [`docs/sweep_real_liver_pca30.json`](sweep_real_liver_pca30.json)。
 
-| backend | params | recall@10 | qps (c=1) | p50_ms | p95_ms | on_pareto |
-| --- | --- | --- | --- | --- | --- | :---: |
-| brute | — | 1.0000 | 1657 | 0.603 | 0.703 | yes |
-| hnswlib | ef=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| hnswlib | ef=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| hnswlib | ef=64 | 0.9996 | 53907 | 0.018 | 0.026 | yes |
-| hnswlib | ef=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| hnswlib | ef=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| hnswlib | ef=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-hnsw | ef=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-hnsw | ef=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-hnsw | ef=64 | 0.9962 | 46171 | 0.020 | 0.032 | yes/no |
-| faiss-hnsw | ef=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-hnsw | ef=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-hnsw | ef=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-ivfpq | nprobe=4 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-ivfpq | nprobe=8 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-ivfpq | nprobe=16 | 0.8046 | 49336 | 0.019 | 0.026 | yes/no |
-| faiss-ivfpq | nprobe=32 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-ivfpq | nprobe=64 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| faiss-ivfpq | nprobe=128 | 0.XXXX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| adaptive-hnsw | ef_base=16 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| adaptive-hnsw | ef_base=32 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| adaptive-hnsw | ef_base=64 | 0.9994 | 23023 | 0.047 | 0.065 | yes/no |
-| adaptive-hnsw | ef_base=128 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| adaptive-hnsw | ef_base=256 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
-| adaptive-hnsw | ef_base=512 | 0.99XX | XXXXX | 0.0XX | 0.0XX | yes/no |
+| backend | params | recall@10 | qps (c=1) | p50_ms | p95_ms | mem_mb | on_pareto |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| adaptive-hnsw | ef_search=16 | 0.9945 | 19906 | 0.052 | 0.062 | 7.10 | · |
+| adaptive-hnsw | ef_search=32 | 0.9945 | 20878 | 0.049 | 0.059 | 7.10 | · |
+| adaptive-hnsw | ef_search=64 | 0.9945 | 19849 | 0.051 | 0.061 | 7.10 | · |
+| adaptive-hnsw | ef_search=128 | 0.9945 | 21170 | 0.049 | 0.058 | 7.10 | · |
+| adaptive-hnsw | ef_search=256 | 0.9945 | 18549 | 0.053 | 0.069 | 7.10 | · |
+| adaptive-hnsw | ef_search=512 | 0.9945 | 18035 | 0.055 | 0.069 | 7.10 | · |
+| brute | — | 1.0000 | 4189 | 0.243 | 0.305 | 3.43 | · |
+| faiss-hnsw | ef_search=16 | 0.9945 | 123257 | 0.008 | 0.011 | 3.43 | ✓ |
+| faiss-hnsw | ef_search=32 | 0.9985 | 86747 | 0.011 | 0.015 | 3.43 | ✓ |
+| faiss-hnsw | ef_search=64 | 0.9990 | 54101 | 0.018 | 0.022 | 3.43 | ✓ |
+| faiss-hnsw | ef_search=128 | 1.0000 | 25064 | 0.039 | 0.048 | 3.43 | · |
+| faiss-hnsw | ef_search=256 | 1.0000 | 11206 | 0.087 | 0.108 | 3.43 | · |
+| faiss-hnsw | ef_search=512 | 1.0000 | 4481 | 0.223 | 0.256 | 3.43 | · |
+| faiss-ivfpq | nprobe=4 | 0.4795 | 117540 | 0.008 | 0.011 | 0.06 | · |
+| faiss-ivfpq | nprobe=8 | 0.4815 | 99251 | 0.010 | 0.012 | 0.06 | · |
+| faiss-ivfpq | nprobe=16 | 0.4815 | 79883 | 0.012 | 0.014 | 0.06 | · |
+| faiss-ivfpq | nprobe=32 | 0.4815 | 57018 | 0.017 | 0.019 | 0.06 | · |
+| faiss-ivfpq | nprobe=64 | 0.4815 | 35994 | 0.027 | 0.031 | 0.06 | · |
+| faiss-ivfpq | nprobe=128 | 0.4815 | 22688 | 0.043 | 0.049 | 0.06 | · |
+| hnswlib | ef_search=16 | 0.9880 | 141434 | 0.007 | 0.010 | 7.10 | ✓ |
+| hnswlib | ef_search=32 | 0.9945 | 101708 | 0.009 | 0.013 | 7.10 | · |
+| hnswlib | ef_search=64 | 0.9945 | 58983 | 0.017 | 0.022 | 7.10 | · |
+| hnswlib | ef_search=128 | 1.0000 | 34416 | 0.028 | 0.037 | 7.10 | ✓ |
+| hnswlib | ef_search=256 | 1.0000 | 19968 | 0.048 | 0.067 | 7.10 | · |
+| hnswlib | ef_search=512 | 1.0000 | 10966 | 0.088 | 0.117 | 7.10 | · |
 
-> 说明：表中已知的几行（hnswlib ef=64、faiss-hnsw ef=64、faiss-ivfpq nprobe=16、adaptive-hnsw ef_base=64、brute）取自 §4 实测，用以校准；其它行均为 `0.99XX` / `XXXXX` 占位。`on_pareto` 列也将在 sweep 跑完后由 `_mark_pareto()` 计算填入。
+观察要点（25 数据点 / 5 帕累托前沿）：
+
+1. **`faiss-hnsw` 全线统治前沿**：低 ef（16/32/64）三档全部入选，因为 SIMD + OMP 在 dim=30 这种短向量上吞吐极高；ef=16 时 recall=0.9945 / QPS≈123k 是单查询场景的最优解。
+2. **`hnswlib` 在 ef=16 / 128 两档入选**：ef=16 极致 QPS（141k），ef=128 推到 recall=1.0 仍保持 QPS≈34k。ef=64 因为被 `faiss-hnsw ef=64` 在两个目标上同时 dominate 而落选。
+3. **`adaptive-hnsw` 全部落选前沿**：自适应触发后内部多了一轮 `set_ef`+ 重查的开销，相比固定 ef 单线程 QPS 不占优；但若把场景换成查询难度差异大的 batch 输入，其平均 ef 会下降，QPS 会回升（见 §4.3 main bench 数据，c=4/8 时 hot path 上 QPS 反弹）。
+4. **`faiss-ivfpq` 在 N=30k 上召回受限**：nlist≈sqrt(N)=173、m=10、nbits=8 + nprobe∈[4,128] 全段 recall 锁在 0.48 附近（PQ 量化损失 + 子集偏移叠加），但内存仅 0.06 MB（图索引族 1/100）。生产建议叠加 re-ranking 或选 N≥100k 数据。
+5. **`brute` 单点 (recall=1.0, QPS=4189)** 在前沿"东南角"——召回不可超越但 QPS 比图索引族低 1~2 个数量级。
 
 ### 7.4 帕累托曲线（静态图）
 

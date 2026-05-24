@@ -37,6 +37,7 @@ import numpy as np
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = SCRIPT_DIR.parent
+PROJECT_ROOT = BACKEND_DIR.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
@@ -52,9 +53,21 @@ from app.services.evaluation import (  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     """解析命令行参数。"""
-    parser = argparse.ArgumentParser(description="离线 ANN 参数扫描（合成数据）")
-    parser.add_argument("--n", type=int, default=30000, help="底库向量条数")
-    parser.add_argument("--dim", type=int, default=30, help="向量维度")
+    parser = argparse.ArgumentParser(description="离线 ANN 参数扫描（合成数据或真实向量）")
+    parser.add_argument(
+        "--vectors_path",
+        type=str,
+        default=None,
+        help="真实向量 npy 文件路径（相对项目根或绝对）；若提供则忽略 --n / --dim 合成参数",
+    )
+    parser.add_argument(
+        "--subset_n",
+        type=int,
+        default=0,
+        help="加载真实向量后做子采样，0 表示用全部向量",
+    )
+    parser.add_argument("--n", type=int, default=30000, help="合成数据底库向量条数")
+    parser.add_argument("--dim", type=int, default=30, help="合成数据向量维度")
     parser.add_argument("--queries", type=int, default=200, help="查询数")
     parser.add_argument("--top_k", type=int, default=10, help="Top-K")
     parser.add_argument(
@@ -79,8 +92,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=str,
-        default="../docs/sweep_offline_pca30.json",
-        help="输出 JSON 路径 (相对 backend 目录)",
+        default="docs/sweep_offline_pca30.json",
+        help="输出 JSON 路径 (相对项目根)",
     )
     return parser.parse_args()
 
@@ -92,16 +105,35 @@ def main() -> None:
     ef_grid = [int(x) for x in args.ef_grid.split(",") if x.strip()]
     nprobe_grid = [int(x) for x in args.nprobe_grid.split(",") if x.strip()]
 
-    print(
-        f"生成合成数据 standard_normal: N={args.n}, dim={args.dim}, queries={args.queries}, seed={args.seed}"
-    )
     rng = np.random.default_rng(args.seed)
-    base = rng.standard_normal((args.n, args.dim)).astype(np.float32)
-    query_idx = rng.choice(args.n, size=args.queries, replace=False)
+    if args.vectors_path:
+        vp = Path(args.vectors_path)
+        vp = vp if vp.is_absolute() else (PROJECT_ROOT / vp).resolve()
+        if not vp.is_file():
+            raise FileNotFoundError(f"vectors_path 不存在: {vp}")
+        print(f"加载真实向量: {vp}")
+        base_full = np.load(vp).astype(np.float32, copy=False)
+        if args.subset_n and args.subset_n > 0 and args.subset_n < base_full.shape[0]:
+            idx = rng.choice(base_full.shape[0], size=args.subset_n, replace=False)
+            base = np.ascontiguousarray(base_full[idx], dtype=np.float32)
+            print(f"  全量 {base_full.shape}，按 seed={args.seed} 子采样到 N={args.subset_n}")
+        else:
+            base = np.ascontiguousarray(base_full, dtype=np.float32)
+            print(f"  使用全量 {base.shape}")
+        n, dim = int(base.shape[0]), int(base.shape[1])
+        data_source = f"real:{vp.name}"
+    else:
+        print(
+            f"生成合成数据 standard_normal: N={args.n}, dim={args.dim}, queries={args.queries}, seed={args.seed}"
+        )
+        base = rng.standard_normal((args.n, args.dim)).astype(np.float32)
+        n, dim = args.n, args.dim
+        data_source = "synthetic_standard_normal"
+    query_idx = rng.choice(n, size=args.queries, replace=False)
     queries = np.ascontiguousarray(base[query_idx], dtype=np.float32)
 
-    print("构造 ground truth (brute) ...")
-    gt = BruteBackend(dim=args.dim, metric="l2")
+    print(f"构造 ground truth (brute) ... N={n}, dim={dim}")
+    gt = BruteBackend(dim=dim, metric="l2")
     gt.build(base)
     truth_indices, _ = gt.search(queries, args.top_k)
     truth_indices = np.asarray(truth_indices)
@@ -140,16 +172,17 @@ def main() -> None:
     print(f"\n=== 总计 {len(collected)} 点, 帕累托前沿 {pareto_count} 点 ===")
 
     out_payload = {
-        "n": args.n,
-        "dim": args.dim,
+        "n": n,
+        "dim": dim,
         "queries": args.queries,
         "top_k": args.top_k,
         "metric": "l2",
         "seed": args.seed,
-        "data_source": "synthetic_standard_normal",
+        "data_source": data_source,
         "points": collected,
     }
-    out_path = (SCRIPT_DIR / args.out).resolve()
+    out_arg = Path(args.out)
+    out_path = out_arg if out_arg.is_absolute() else (PROJECT_ROOT / out_arg).resolve()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out_payload, indent=2, ensure_ascii=False))
     print(f"\n输出 -> {out_path}")

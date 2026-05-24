@@ -348,7 +348,9 @@ def _build_backend_for_sweep(
     n = int(vectors.shape[0])
     build_kwargs: dict[str, Any] = {}
     if backend_name == "faiss-ivfpq":
-        nlist = max(1, min(64, n // 4))
+        # nlist 启发式: sqrt(N), 限制在 [8, 4096], 且不超过 N // 4 避免 IVF train 失败
+        nlist_target = int(max(8, min(4096, n**0.5)))
+        nlist = max(1, min(nlist_target, max(1, n // 4)))
         m = _pick_pq_m(int(vectors.shape[1]))
         build_kwargs.update({"nlist": nlist, "m": m, "nbits": 8})
     backend.build(vectors, **build_kwargs)
