@@ -61,10 +61,10 @@ style: |
 | # | 章节 | 关键词 |
 |---|---|---|
 | 1 | 项目背景 | 单细胞测序 · ANN 必要性 |
-| 2 | 需求分析 | 课程要求 · 功能矩阵 · 加分项 |
+| 2 | 需求分析 | 课程要求 · 功能矩阵 · 扩展功能 |
 | 3 | 系统设计 | 架构 · 技术栈 · 引擎抽象 · 数据模型 |
 | 4 | 核心实现 | 检索流水线 · 关键代码 |
-| 5 | 加分功能 | 多数据集联合 · Adaptive HNSW · RAG |
+| 5 | 扩展功能 | 多数据集联合 · Adaptive HNSW · RAG |
 | 6 | 实测与交付 | 性能数据 · 演示截图 · 质量保障 · 总结 |
 
 ---
@@ -100,7 +100,7 @@ style: |
 | 查询检索 | 按 cell_id / 按向量 / 条件过滤 / Top-K |
 | 可视化 | UMAP 投影、检索结果高亮、性能图表 |
 
-**加分功能**（全做）
+**扩展功能**（全做）
 
 - **多数据集联合检索**：并发 + min-max 归一化 + 重排
 - **ANN 算法改进**：自适应 HNSW（自研后端）
@@ -178,7 +178,7 @@ IndexBackend (ABC)
 | `hnswlib` | hnswlib 0.8.0 | 高召回 + 微秒级延迟 |
 | `faiss-hnsw` | faiss 1.13 | OMP 多线程友好 |
 | `faiss-ivfpq` | faiss 1.13 | 量化压缩，内存极小 |
-| `adaptive-hnsw` | 自研 | 早停 + 升档（加分项） |
+| `adaptive-hnsw` | 自研 | 早停 + 升档（扩展功能） |
 
 `create_backend()` 工厂 + `IndexCache` LRU 缓存 → 路由层无需感知后端差异
 
@@ -315,7 +315,7 @@ while pending.size > 0:
 
 ---
 
-# 5. 加分项 ①：多数据集联合检索
+# 5. 扩展功能 ①：多数据集联合检索
 
 **问题**：用户希望"在多个肝脏数据集里一起找相似细胞"
 
@@ -339,7 +339,7 @@ for i, item in enumerate(final, start=1):
 
 <!-- _class: tiny -->
 
-# 5. 加分项 ②：自适应 HNSW
+# 5. 扩展功能 ②：自适应 HNSW
 
 **动机**：固定 `ef_search` 在 query 难度分布不均时浪费算力 / 召回不足。
 
@@ -365,7 +365,7 @@ for i, item in enumerate(final, start=1):
 
 <!-- _class: smaller -->
 
-# 5. 加分项 ③：RAG 自然语言查询
+# 5. 扩展功能 ③：RAG 自然语言查询
 
 **流程**：`parse_query → ANN search → summarize`
 
@@ -504,8 +504,8 @@ hits: [{cell_id, distance, meta}, ...]
 
 **关键提交节点**：
 
-- `feat(backend): 自适应 HNSW 后端 + 基准测试脚本（加分项）`
-- `feat(backend): RAG 自然语言查询模块（加分项）`
+- `feat(backend): 自适应 HNSW 后端 + 基准测试脚本（扩展功能）`
+- `feat(backend): RAG 自然语言查询模块（扩展功能）`
 - `feat(backend): 检索与性能评测模块（条件过滤 + 多数据集联合 + Recall/QPS/延迟）`
 - `test(e2e): Playwright 端到端真实数据测试 + 9 张验收截图`
 
@@ -657,7 +657,7 @@ def _l2_sq_dists_numba(vectors, query):
 |---|---|---|---|
 | F1 | `POST /search/batch` | `queries: [{cell_id, vector}] · 1 ≤ N ≤ 50` · `asyncio.gather` 并发 · 每条独立 SearchCache | 评测脚本一次性提交，全局 `total_latency_ms` + 逐条 `cache_hit` |
 | F6 | `POST /search/by-vector-stream` | `text/event-stream` SSE · `event: hit` 每 ~20ms 推一条 · 末尾 `event: done` 汇总 `latency_ms` | 前端"逐条飞入"动画，消除等待感 |
-| F7 | `POST /search/multi-dataset` | 并发查多数据集 · min-max 归一化 · 全局 Top-K · 标 `source_dataset_id` | 跨数据集 ensemble（v1.0 加分项 ①） |
+| F7 | `POST /search/multi-dataset` | 并发查多数据集 · min-max 归一化 · 全局 Top-K · 标 `source_dataset_id` | 跨数据集 ensemble（v1.0 扩展功能 ①） |
 | F8 | `LLM_PROVIDER=anthropic` | `AnthropicClient` 接入 Claude Opus 4 · 工厂分支 + 失败自动 fallback Mock | RAG `parse_query` / `summarize` 第四种 LLM |
 
 **F1 batch 请求示例**
@@ -690,11 +690,11 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 
 <!-- _class: smaller -->
 
-# 8.1 v1.2 路线图：6 项加分 × 3 milestone × Pattern B 并行
+# 8.1 v1.2 路线图：6 项扩展功能 × 3 milestone × Pattern B 并行
 
-<span class="muted">v1.1.0 之后再启 v1.2 路线图，**6 项加分功能全部交付**；Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 subagent 并行）+ 全程 `/loop 5m` polish。</span>
+<span class="muted">v1.1.0 之后再启 v1.2 路线图，**6 项扩展功能全部交付**；Pattern B 阶段化并行（milestone 间串行 + milestone 内 2~3 subagent 并行）+ 全程 `/loop 5m` polish。</span>
 
-| Milestone | 加分项 | tag | 核心交付 |
+| Milestone | 扩展功能 | tag | 核心交付 |
 |---|---|---|---|
 | **M1** 性能呈现升级 | **C3** recall-QPS 帕累托 + **D1** 交互仪表盘 | `v1.2.0-alpha.1` | 3 sweep REST + `/search/with_params` + EvaluationPage 双 Tab |
 | **M2** 算法可视化 + 单细胞独家 | **D2** HNSW 邻居图 + **C5** 稀疏感知 ANN | `v1.2.0-alpha.2` | `/indexes/{id}/subgraph` + `SparseBruteBackend` + IndexGraphPage 474 行 |
@@ -708,7 +708,7 @@ data: {"latency_ms":0.47,"total_candidates":10,"index_backend":"hnswlib"}
 
 <!-- _class: tiny -->
 
-# 8.2 C3 加分：recall-QPS 帕累托曲线（ANN-Benchmarks 风格）
+# 8.2 C3 扩展功能：recall-QPS 帕累托曲线（ANN-Benchmarks 风格）
 
 <div class="cols">
 
@@ -743,7 +743,7 @@ async def param_sweep(session, dataset_id,
 
 </div>
 
-→ 完整 25 数据点 + 5 帕累托前沿见 `docs/sweep_real_liver_pca30.json` + `docs/benchmark_report.md` §7。
+→ 完整 25 数据点 + 5 帕累托前沿见 `docs/benchmark_data/sweep_real_liver_pca30.json` + `docs/benchmark_report.md` §7。
 
 ---
 
@@ -757,7 +757,7 @@ async def param_sweep(session, dataset_id,
 
 <!-- _class: smaller -->
 
-# 8.3 D1 + D2 加分：交互仪表盘 + HNSW 邻居图可视化
+# 8.3 D1 + D2 扩展功能：交互仪表盘 + HNSW 邻居图可视化
 
 <div class="cols">
 
@@ -801,7 +801,7 @@ def get_local_subgraph(entry_label, depth, layer, max_nodes):
 
 <!-- _class: smaller -->
 
-# 8.4 C5 加分：稀疏感知 ANN — 单细胞独家卖点
+# 8.4 C5 扩展功能：稀疏感知 ANN — 单细胞独家卖点
 
 <span class="muted">单细胞 RNA-seq 表达矩阵天然稀疏（90%+ 基因为 0）。常规走 PCA 降到 30~50 维稠密向量，会丢失稀有基因的强表达信号。</span>
 
@@ -855,7 +855,7 @@ preprocess_h5ad(..., vector_source="raw_sparse")
 
 <!-- _class: tiny -->
 
-# 8.5 D7 + D4 加分：跨数据集对齐 + LLM Function Calling Agent
+# 8.5 D7 + D4 扩展功能：跨数据集对齐 + LLM Function Calling Agent
 
 <div class="cols">
 
@@ -920,7 +920,7 @@ async def chat_with_tools(session, user, query,
 | REST 接口 | 31+ | **45+** | +14 |
 | Alembic 迁移 | 1 | **5** | +4 |
 | ANN 后端数 | 5 | **6** | +1 |
-| 累计加分项 | 11 | **17** | +6 |
+| 累计扩展功能 | 11 | **17** | +6 |
 | benchmark 章节 | §5.7 | **§9** | +§7/§8/§9 |
 
 `pytest 76→110 +34 个新测试` 覆盖 sweep / subgraph / sparse / alignment / RAG agent 五类新功能。

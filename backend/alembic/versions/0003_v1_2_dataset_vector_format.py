@@ -1,4 +1,4 @@
-"""v1.2 加分项 C5: datasets 表新增 vector_format 字段。
+"""v1.2 扩展功能 C5: datasets 表新增 vector_format 字段。
 
 Revision ID: 0003_v1_2_dataset_vector_format
 Revises: 0002_v1_2_sweep_tables

@@ -9,7 +9,7 @@
         复用 ``adata.obsm['X_pca']`` 或现场跑 ``scanpy`` 标准流水线
         （QC → normalize → log1p → HVG → scale → PCA(50)），向量以稠密
         ``float32`` 矩阵落盘 ``vectors.npy``，``vector_format='dense'``。
-    - ``raw_sparse`` (M2.C5 加分项)
+    - ``raw_sparse`` (M2.C5 扩展功能)
         跳过 PCA，对 ``adata`` 跑 ``normalize_total → log1p →
         highly_variable_genes`` 后 ``subset to top-5000 HVG``，把得到的
         :class:`scipy.sparse.csr_matrix` 直接落盘 ``vectors.npz``，

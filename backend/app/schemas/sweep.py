@@ -1,4 +1,4 @@
-"""参数扫描相关 Pydantic schema (v1.2 C3 加分项)。
+"""参数扫描相关 Pydantic schema (v1.2 C3 扩展功能)。
 
 字段约定：
     - ``backends`` 取值集合：``hnswlib | faiss-hnsw | faiss-ivfpq | brute |

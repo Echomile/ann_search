@@ -882,7 +882,7 @@ def search_aligned_dataset(
     filters: dict[str, Any] | None = None,
     exclude_cell_id: str | None = None,
 ) -> dict[str, Any]:
-    """在对齐数据集上执行单库检索（D7 加分项）。
+    """在对齐数据集上执行单库检索（D7 扩展功能）。
 
     对齐数据集的向量来自跨数据集 PCA / harmony 校正后的统一空间，
     无需 min-max 归一化即可直接合并结果。内部用 brute 后端（``l2``）即可，

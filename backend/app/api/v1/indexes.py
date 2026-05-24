@@ -326,7 +326,7 @@ _SUPPORTED_SUBGRAPH_BACKENDS = {"hnswlib", "adaptive-hnsw"}
     response_model=SubgraphResponse,
     summary="HNSW 邻居子图",
     description=(
-        "返回 HNSW 索引在指定 cell 周围的局部邻居图，用于 v1.2 D2 加分项的"
+        "返回 HNSW 索引在指定 cell 周围的局部邻居图，用于 v1.2 D2 扩展功能的"
         " 小世界图可视化。\n\n"
         "仅 ``hnswlib`` 与 ``adaptive-hnsw`` 后端支持；其他后端返回"
         " ``400 该后端不暴露图结构``。\n\n"
@@ -350,7 +350,7 @@ async def get_index_subgraph(
     layer: int = 0,
     max_nodes: int = 200,
 ) -> SubgraphResponse:
-    """返回 HNSW 索引在指定 cell 周围的局部邻居子图（D2 加分项）。
+    """返回 HNSW 索引在指定 cell 周围的局部邻居子图（D2 扩展功能）。
 
     Args:
         index_id: 索引 ID。

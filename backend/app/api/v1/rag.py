@@ -1,6 +1,6 @@
 """RAG（自然语言查询单细胞数据）路由。
 
-属于 v1.2 D4 加分项：从 v1.1 的 ``parse → search → summarize`` 三段固定流程，
+属于 v1.2 D4 扩展功能：从 v1.1 的 ``parse → search → summarize`` 三段固定流程，
 升级到 **LLM Function Calling Agent** 多轮工具调用模式。
 
 接口列表：
@@ -37,7 +37,7 @@ router = APIRouter(prefix="/rag", tags=["rag"])
     response_model=RagChatResponse,
     summary="LLM Function Calling 多轮聊天",
     description=(
-        "v1.2 D4 加分项主入口：LLM 自主调用 ``list_datasets`` / ``search_by_cell_id`` /"
+        "v1.2 D4 扩展功能主入口：LLM 自主调用 ``list_datasets`` / ``search_by_cell_id`` /"
         " ``search_by_vector`` / ``filter_cells`` / ``summarize_results`` 五个工具，"
         "通过多轮 tool_call → tool_result 循环直到给出最终回答。\n\n"
         "- 不传 ``session_id`` 时自动新建会话，``title`` 取首条 query 前 50 字；\n"

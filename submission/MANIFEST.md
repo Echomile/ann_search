@@ -6,7 +6,7 @@
 **当前 tag**：`v1.1.0`（2026-05-24，基于 v1.0.0 的 feat+perf+polish 平衡升级）  
 **提交日期**：2026 年 5 月
 
-本清单按 `project.md` 中"团队作业结项提交"要求逐项列出全部交付物，所有文件均位于仓库根目录的相对路径下，可直接在 GitHub Markdown 中点击访问。
+本清单按 [`docs/00_课程需求.md`](../docs/00_课程需求.md) 中"团队作业结项提交"要求逐项列出全部交付物，所有文件均位于仓库根目录的相对路径下，可直接在 GitHub Markdown 中点击访问。
 
 > **快速浏览版本演进**：[`CHANGELOG.md`](../CHANGELOG.md) 列出 v1.0.0 与 v1.1.0 全量 commit；本清单聚焦"提交了什么"。
 
@@ -16,7 +16,7 @@
 
 | 版本 | 日期 | 概要 | 关键产出 |
 | --- | --- | --- | --- |
-| **v1.0.0** | 2026-05-23 | 课程要求 + 三项加分项首版交付 | 21 接口 / 21 张 PPT / 9 张截图 / 5'54" 演示视频草稿 |
+| **v1.0.0** | 2026-05-23 | 课程要求 + 三项扩展功能首版交付 | 21 接口 / 21 张 PPT / 9 张截图 / 5'54" 演示视频草稿 |
 | **v1.1.0** | 2026-05-24 | feat + perf + polish 平衡升级 | **31+ 接口 / 25 张 PPT / 14 张截图 / 7'42" 演示视频 / 6 张架构图 / 76 pytest + 42 vitest** |
 
 ---
@@ -87,16 +87,16 @@
 | Stats E2E（v1.1 D2） | [`e2e/test_stats_e2e.py`](../e2e/test_stats_e2e.py) | 评测后 SearchLog Dashboard 渲染 |
 | RAG E2E（v1.1 D2） | [`e2e/test_rag_e2e.py`](../e2e/test_rag_e2e.py) | 自然语言查询 + hits 表格 |
 | 验收截图（**14 张**） | [`docs/e2e_screenshots/`](../docs/e2e_screenshots/) | 含 v1.1 新增：admin / SearchLog Dashboard / IndexDetail / multi-dataset 等 |
-| 性能基准数据 | [`docs/benchmark_results.json`](../docs/benchmark_results.json) | 5 后端 × N × dim × top_k × concurrency 完整性能数据（含 N=100k） |
+| 性能基准数据 | [`docs/benchmark_data/`](../docs/benchmark_data/) | 5 后端 × N × dim × top_k × concurrency 完整性能数据（含 N=100k）+ sweep 与对齐原始 JSON |
 | 基准脚本 | [`backend/scripts/benchmark.py`](../backend/scripts/benchmark.py) | argparse CLI · 自动生成报告 |
 | 后端 pytest（76 用例） | [`backend/tests/`](../backend/tests/) | 含 F2 Redis 缓存 / F8 Anthropic / IndexCache / SearchCache / Adaptive HNSW 单测 |
 | 前端 vitest（42 用例） | [`frontend/src/**/*.test.ts*`](../frontend/src/) | utils / hooks / stores 单测 |
 
-## 六、加分功能交付
+## 六、扩展功能交付
 
-### 6.1 课程要求三项加分（v1.0.0 已完成）
+### 6.1 课程要求三项扩展能力（v1.0.0 已完成）
 
-| 加分项 | 主要实现位置 | 说明 |
+| 扩展功能 | 主要实现位置 | 说明 |
 | --- | --- | --- |
 | 多数据集联合检索 | [`backend/app/api/v1/search.py`](../backend/app/api/v1/search.py) · `multi_dataset_search` | `asyncio.gather` 并发查多索引 + min-max 归一化 + 重排 |
 | ANN 算法改进 | [`backend/app/services/ann/adaptive_hnsw_backend.py`](../backend/app/services/ann/adaptive_hnsw_backend.py) | 自适应 ef_search：首轮 gap 早停 + 升档至上限 512 |

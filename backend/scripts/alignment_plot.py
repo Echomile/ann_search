@@ -6,7 +6,7 @@
 典型用法::
 
     cd backend && uv run python scripts/alignment_plot.py \\
-        --in docs/alignment_offline_3way.json \\
+        --in docs/benchmark_data/alignment_offline_3way.json \\
         --out docs/assets/benchmark/alignment_3way.png
 """
 
@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
         "--in",
         dest="in_path",
         type=str,
-        default="docs/alignment_offline_3way.json",
+        default="docs/benchmark_data/alignment_offline_3way.json",
         help="输入 JSON 路径 (相对项目根或绝对)",
     )
     parser.add_argument(

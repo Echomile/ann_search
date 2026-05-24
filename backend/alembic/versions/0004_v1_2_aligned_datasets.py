@@ -1,4 +1,4 @@
-"""v1.2 加分项 D7: 新增 aligned_datasets 表。
+"""v1.2 扩展功能 D7: 新增 aligned_datasets 表。
 
 Revision ID: 0004_v1_2_aligned_datasets
 Revises: 0003_v1_2_dataset_vector_format

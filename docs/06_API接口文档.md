@@ -565,7 +565,7 @@
 ]
 ```
 
-## 6.8 RAG 模块（加分）
+## 6.8 RAG 模块（扩展）
 
 源码：[`backend/app/api/v1/rag.py`](../backend/app/api/v1/rag.py)
 
@@ -643,7 +643,7 @@
 | 18 | evaluation | POST | `/api/v1/evaluation/run` | 发起索引基准评测 | ✓ |
 | 19 | evaluation | GET | `/api/v1/evaluation/{index_id}/latest` | 索引最近一次评测结果 | ✓ |
 | 20 | evaluation | GET | `/api/v1/evaluation/results` | 评测结果列表 | ✓ |
-| 21 | rag | POST | `/api/v1/rag/query` | 自然语言检索（加分项）| ✓ |
+| 21 | rag | POST | `/api/v1/rag/query` | 自然语言检索（扩展功能）| ✓ |
 
 ## 6.10 cURL 示例
 

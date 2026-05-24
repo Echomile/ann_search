@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import BASE_URL, PASSWORD, USERNAME  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-LIVER_PATH = ROOT / "liver.h5ad"
+LIVER_PATH = ROOT / "data" / "raw" / "liver.h5ad"
 SCREENSHOT_DIR = ROOT / "docs" / "e2e_screenshots"
 SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -52,7 +52,7 @@ const BACKEND_OPTIONS: { value: IndexBackend; label: string; desc: string }[] = 
   {
     value: 'sparse-brute',
     label: 'sparse-brute',
-    desc: 'v1.2 加分项 C5：稀疏 HVG 向量直接检索（跳过 PCA）',
+    desc: 'v1.2 扩展功能 C5：稀疏 HVG 向量直接检索（跳过 PCA）',
   },
 ];
 

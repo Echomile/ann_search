@@ -1,4 +1,4 @@
-"""v1.2 加分项 D4: 新增 rag_sessions / rag_messages 两张表。
+"""v1.2 扩展功能 D4: 新增 rag_sessions / rag_messages 两张表。
 
 Revision ID: 0005_v1_2_rag_sessions
 Revises: 0004_v1_2_aligned_datasets

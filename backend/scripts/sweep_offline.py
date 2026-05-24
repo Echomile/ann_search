@@ -9,7 +9,7 @@
 
     cd backend && uv run python scripts/sweep_offline.py \\
         --n 30000 --dim 30 --queries 200 --top_k 10 \\
-        --out ../docs/sweep_offline_pca30.json
+        --out ../docs/benchmark_data/sweep_offline_pca30.json
 
 输出 JSON 结构::
 
@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=str,
-        default="docs/sweep_offline_pca30.json",
+        default="docs/benchmark_data/sweep_offline_pca30.json",
         help="输出 JSON 路径 (相对项目根)",
     )
     return parser.parse_args()

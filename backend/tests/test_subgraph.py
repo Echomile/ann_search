@@ -1,4 +1,4 @@
-"""``GET /api/v1/indexes/{id}/subgraph`` 端到端测试（v1.2 D2 加分项）。
+"""``GET /api/v1/indexes/{id}/subgraph`` 端到端测试（v1.2 D2 扩展功能）。
 
 验证目标：
     - **test_subgraph_hnswlib**: hnswlib 后端可拉到 entry/邻居/边的合理子图，

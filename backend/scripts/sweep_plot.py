@@ -3,7 +3,7 @@
 典型用法::
 
     cd backend && uv run python scripts/sweep_plot.py \\
-        --in docs/sweep_real_liver_pca30.json \\
+        --in docs/benchmark_data/sweep_real_liver_pca30.json \\
         --out docs/assets/benchmark/pareto_pca30.png
 
 输出: 一张 recall-QPS 帕累托散点 + 前沿连线图, 按 backend 分组着色。

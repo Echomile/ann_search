@@ -1,4 +1,4 @@
-"""HNSW 局部邻居子图相关 schema（v1.2 D2 加分项）。
+"""HNSW 局部邻居子图相关 schema（v1.2 D2 扩展功能）。
 
 用于 :func:`app.api.v1.indexes.get_index_subgraph` 接口的入参/出参契约：
 前端拿到这些结构后通过 Plotly 渲染节点 + 边，让用户直观看到 HNSW 小世界图。

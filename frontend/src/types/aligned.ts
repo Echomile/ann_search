@@ -1,4 +1,4 @@
-// 跨数据集语义对齐相关类型（v1.2 D7 加分项）
+// 跨数据集语义对齐相关类型（v1.2 D7 扩展功能）
 // 字段命名与后端 Pydantic schema 严格一致（snake_case）
 
 export type AlignMethod = 'intersect_only' | 'harmony';

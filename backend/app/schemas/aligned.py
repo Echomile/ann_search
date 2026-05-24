@@ -1,4 +1,4 @@
-"""跨数据集语义对齐 schema (v1.2 D7 加分项)。
+"""跨数据集语义对齐 schema (v1.2 D7 扩展功能)。
 
 约定字段：
     - ``method``: ``intersect_only | harmony``；harmonypy 不可用时降级。

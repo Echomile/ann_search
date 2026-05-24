@@ -1,4 +1,4 @@
-// HNSW 局部邻居子图相关类型（v1.2 D2 加分项）
+// HNSW 局部邻居子图相关类型（v1.2 D2 扩展功能）
 // 字段命名与后端 SubgraphResponse / SubgraphNode / SubgraphEdge 严格一致
 
 export interface SubgraphNode {

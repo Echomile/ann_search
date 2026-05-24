@@ -1,4 +1,4 @@
-"""参数扫描相关 ORM 模型 (v1.2 C3 加分项: recall-QPS 帕累托曲线)。
+"""参数扫描相关 ORM 模型 (v1.2 C3 扩展功能: recall-QPS 帕累托曲线)。
 
 设计目标：
     - :class:`SweepRun` 描述一次扫描任务（按 dataset × backends × params 组合）。

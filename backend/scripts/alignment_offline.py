@@ -24,7 +24,7 @@ min-max 难以完美对齐.
     cd backend && uv run python scripts/alignment_offline.py \\
         --vectors_path data/processed/3/vectors.npy \\
         --n_splits 3 --queries 100 --top_k 10 \\
-        --out ../docs/alignment_offline_3way.json
+        --out ../docs/benchmark_data/alignment_offline_3way.json
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--out",
         type=str,
-        default="docs/alignment_offline_3way.json",
+        default="docs/benchmark_data/alignment_offline_3way.json",
         help="输出 JSON 路径 (相对项目根或绝对)",
     )
     return parser.parse_args()

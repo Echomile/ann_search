@@ -81,7 +81,7 @@ export const datasetsApi = {
   },
 };
 
-// 跨数据集语义对齐 API（v1.2 D7 加分项）
+// 跨数据集语义对齐 API（v1.2 D7 扩展功能）
 export const alignmentApi = {
   /** 触发同步对齐 */
   align: async (payload: AlignRequest): Promise<AlignedDataset> => {

@@ -36,7 +36,7 @@ export const indexesApi = {
     await httpClient.delete(`/indexes/${id}`);
   },
 
-  // D2 加分项：拉取 HNSW 索引在 cell 周围的局部邻居子图（用于可视化）
+  // D2 扩展功能：拉取 HNSW 索引在 cell 周围的局部邻居子图（用于可视化）
   getSubgraph: async (id: number, query: SubgraphQuery): Promise<SubgraphResponse> => {
     const { data } = await httpClient.get<SubgraphResponse>(`/indexes/${id}/subgraph`, {
       params: {

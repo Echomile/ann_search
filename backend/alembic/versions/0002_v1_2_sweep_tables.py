@@ -1,4 +1,4 @@
-"""v1.2 加分项 C3: 新增 sweep_runs / sweep_points 两张表。
+"""v1.2 扩展功能 C3: 新增 sweep_runs / sweep_points 两张表。
 
 Revision ID: 0002_v1_2_sweep_tables
 Revises: 0001_initial

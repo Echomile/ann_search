@@ -151,7 +151,7 @@ def search_demo(page: Page, cell_id: str) -> None:
 def multi_dataset_demo(page: Page, ds_info: dict, cell_id: str) -> None:
     """多数据集联合检索 tab：填表 → 发起检索 → 截图（含 "来源数据集" 列）。
 
-    通过前端真实交互演示 C5 加分项：在当前已就绪数据集列表里挑选若干（仅一个
+    通过前端真实交互演示 C5 扩展功能：在当前已就绪数据集列表里挑选若干（仅一个
     时即选择自身）作为参与检索集合，把它当作 ``source_dataset_id``，并复用
     上一步 ``search_demo`` 拿到的 ``cell_id`` 触发跨集检索。
     """

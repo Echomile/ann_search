@@ -157,7 +157,7 @@ const DEFAULT_FORM: FormValues = {
 };
 
 /**
- * HNSW 邻居子图可视化页（v1.2 D2 加分项）。
+ * HNSW 邻居子图可视化页（v1.2 D2 扩展功能）。
  *
  * 路由：``/indexes/:id/graph``。允许用户：
  *  1. 选择数据集 + HNSW 系索引（``hnswlib`` / ``adaptive-hnsw``）；

@@ -1,4 +1,4 @@
-"""RAG Agent 工具集（v1.2 D4 加分项）。
+"""RAG Agent 工具集（v1.2 D4 扩展功能）。
 
 设计目标:
     LLM Function Calling Agent 风格下，LLM 自主决定调用哪个工具完成用户任务。

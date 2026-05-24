@@ -119,7 +119,9 @@ def load_vectors(args: argparse.Namespace) -> tuple[np.ndarray, np.ndarray, str]
         FileNotFoundError: ``--use-liver`` 指定但找不到 ``liver.h5ad``。
     """
     if args.use_liver:
-        liver_path = Path(args.liver_path or (PROJECT_ROOT / "liver.h5ad"))
+        liver_path = Path(
+            args.liver_path or (PROJECT_ROOT / "data" / "raw" / "liver.h5ad")
+        )
         if not liver_path.exists():
             raise FileNotFoundError(f"未找到 liver.h5ad: {liver_path}")
         import anndata
