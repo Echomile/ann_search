@@ -3,6 +3,56 @@
 本项目遵循 [约定式提交 (Conventional Commits)](https://www.conventionalcommits.org/zh-hans/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [v1.2.0-alpha.2] - 2026-05-24
+
+v1.2.0-alpha.1 之后的 **M2 算法可视化 + 单细胞独家性**：2 个大型 feature commit（D2 + C5），新增 1 个 REST 接口（subgraph）+ 1 张新表（datasets.vector_format）+ 1 个新 ANN 后端（sparse-brute）+ 1 个新前端页面（IndexGraphPage）+ 1 个新章节（§8 稀疏对比）。
+
+### 新功能 Features
+
+#### v1.2 加分项 D2 · HNSW 邻居图结构可视化
+
+- **feat(d2)**：让 HNSW 索引的小世界图可见（commit `1cc26b0`）。
+- 后端 `HnswlibBackend.get_local_subgraph(entry_label, depth, layer, max_nodes)`：调 `hnswlib.Index.get_neighbors_list` 拿邻接表 + BFS 展开 depth 跳；旧版 hnswlib 不支持时 raise `NotImplementedError`。
+- 新增 REST 接口 `GET /api/v1/indexes/{id}/subgraph?cell_id=&depth=&layer=&max_nodes=`，限定 hnswlib / adaptive-hnsw 后端，通过 `cell_ids` 映射到内部 label，返回前端友好的子图结构。
+- 新增 schema `SubgraphNode / SubgraphEdge / SubgraphResponse`（含 `is_entry / is_topk / cell_type` 元数据字段）。
+- 新增前端页面 `IndexGraphPage.tsx`（474 行）：Plotly 渲染节点 + 边图，查询起点红五角星，depth=1 橙色，depth>=2 灰色，提供 depth/layer/max_nodes 控件，truncated 状态条提示。
+- `IndexDetailPage` 新增「查看邻居图」按钮跳转到 `/indexes/:id/graph`（仅 hnswlib / adaptive-hnsw 可用），Layout 菜单加入索引图谱入口。
+- **修复**：`IndexBackend` TypeScript type union 扩展 `adaptive-hnsw` + `sparse-brute`（修复 v1.0 以来 long-standing union 不完整 bug）。
+
+#### v1.2 加分项 C5 · 稀疏感知 ANN
+
+- **feat(c5)**：单细胞独家性卖点 - 跳过 PCA 在 5000 HVG 稀疏向量上直接做检索（commit `2a0f928`）。
+- 新增 `SparseBruteBackend`（230 行）基于 `scipy.sparse.csr_matrix`，支持 l2 / cosine / ip 三种度量；行 L2 归一化用对角缩放（纯稀疏路径不展开稠密），l2 距离公式 `||a||² + ||b||² - 2 a·b` 预计算并缓存底库 sq_norms。
+- 工厂注册新后端 `sparse-brute`。
+- 数据模型 `Dataset.vector_format: Literal["dense", "sparse"]` + alembic `0003_v1_2_dataset_vector_format` migration（batch_alter_table 兼容 SQLite，`server_default='dense'` 自动回填旧数据）。
+- 预处理 `preprocess.py` 新增 `vector_source="raw_sparse"` 模式：跳过 PCA，选 top 5000 HVG 后保存为 `.npz` 稀疏格式；index_task / preprocess_task 适配 `.npy / .npz` 路径分流。
+- 前端 `IndexManagePage` BACKEND_OPTIONS 加入 `adaptive-hnsw` + `sparse-brute` 两个选项（之前 adaptive-hnsw 仅后端可用，前端选不到）。
+
+### 工程优化 Engineering
+
+- **fix(eval)**：`_build_backend_for_sweep` 的 `faiss-ivfpq` nlist 启发式从写死 64 改为 `sqrt(N)`（在 [8, 4096] 范围内，不超过 `N//4`），原写法对 N=30k 时召回受 nlist 过小拖累，从 ~0.42 提升到 ~0.48（commit `843cad3`）。
+- **feat(scripts)** 新增 `backend/scripts/sweep_offline.py`：离线 sweep CLI，复用 `evaluation.py` 纯函数工具，支持合成数据或加载真实 npy 向量，输出 JSON 用于 docs 回填（commit `3392350` + `843cad3`）。
+- **feat(scripts)** 新增 `backend/scripts/sweep_plot.py`：matplotlib PNG 导出器，按 backend 分组着色 + 帕累托前沿 ★ 标记 + 红色虚线连接 + log Y 轴（commit `3ee988c`）。
+- **§7.3 真实数据回填**：用 liver.h5ad PCA 30D N=30000 子集跑出 25 个数据点（5 帕累托前沿），表格内所有 `0.99XX / XXXXX` 占位全部替换为实测值；原始 JSON 保存 `docs/sweep_real_liver_pca30.json`，静态 PNG `docs/assets/benchmark/pareto_pca30.png`。
+
+### 文档 Docs
+
+- `docs/benchmark_report.md` §8 新增「稀疏感知 ANN: SparseBruteBackend vs 稠密后端对比」（8.1-8.6 六个小节）；§7.3 真实数据回填（25 数据点 + 5 帕累托前沿 + 5 条观察要点）。
+
+### 工程指标 (v1.2.0-alpha.1 → v1.2.0-alpha.2)
+
+| 维度 | alpha.1 | alpha.2 | 增量 |
+| --- | ---: | ---: | --- |
+| 后端 pytest | 86 | **96** | +10（D2 subgraph + C5 sparse 测试） |
+| 前端 vitest | 42 | **42** | 0 |
+| REST 接口 | 35+ | **36+** | +1（subgraph） |
+| Alembic 迁移版本 | 2 | **3** | +1（0003 vector_format） |
+| ANN 后端数量 | 5 | **6** | +1（sparse-brute） |
+| 前端页面 | — | **+IndexGraphPage** | 474 行 Plotly 图可视化 |
+| 文档章节 | §7 占位 | **§7 实测 + §8** | §7 全部回填 + §8 完整 6 小节 |
+
+[v1.2.0-alpha.2]: https://github.com/aokimi/ann_search/releases/tag/v1.2.0-alpha.2
+
 ## [v1.2.0-alpha.1] - 2026-05-24
 
 v1.1.0 之后的 **M1 性能呈现升级**：6 个语义化 commit（feat 3 / docs 1 / chore 2 / 含 Phase 0 初始化），新增 4 个 REST 接口（3 个 sweep + 1 个 with_params）+ 2 张新表 + 1 个前端 Tab + 1 张 PPT 增量页，全部基于 `feat/v1.2-bonus` 分支。本里程碑覆盖 v1.2 路线图的 6 项加分功能中的前 2 项（C3 帕累托曲线 / D1 交互式仪表盘）。

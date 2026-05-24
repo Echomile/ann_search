@@ -7,95 +7,74 @@
     {
       "id": "M1",
       "name": "性能呈现升级",
-      "status": "code_complete_pending_release",
+      "status": "released",
       "tag": "v1.2.0-alpha.1",
       "tasks": [
+        {"id": "M1.C3.backend", "status": "done", "commit": "4529a27"},
+        {"id": "M1.D1.backend", "status": "done", "commit": "f42e2ae"},
+        {"id": "M1.C3.docs", "status": "done", "commit": "d8f5ae9"},
+        {"id": "M1.C3.frontend", "status": "done", "commit": "85dedc9"},
+        {"id": "M1.D1.frontend", "status": "done", "commit": "85dedc9"},
+        {"id": "M1.release", "status": "done", "commit": "11a986b"},
         {
-          "id": "M1.C3.backend",
-          "owner": "subagent-M1-alpha",
+          "id": "M1.polish.real_data",
           "status": "done",
-          "commit": "4529a27",
-          "desc": "evaluation.param_sweep + sweep_run/sweep_point migration + 3 个 sweep REST 接口 + pytest"
+          "commit": "843cad3",
+          "desc": "真实 liver PCA 30D N=30000 子集 sweep + nlist 启发式修复 + §7.3 回填"
         },
         {
-          "id": "M1.D1.backend",
-          "owner": "subagent-M1-beta",
+          "id": "M1.polish.png",
           "status": "done",
-          "commit": "f42e2ae",
-          "desc": "POST /search/with_params 透传 runtime_params 接口 + 单测"
-        },
-        {
-          "id": "M1.C3.docs",
-          "owner": "subagent-M1-gamma",
-          "status": "done",
-          "commit": "d8f5ae9",
-          "desc": "benchmark_report.md §7 帕累托章节草稿（占位）+ PPT 增量页 markdown 草稿"
-        },
-        {
-          "id": "M1.C3.frontend",
-          "owner": "main-agent",
-          "status": "done",
-          "commit": "85dedc9",
-          "desc": "EvaluationPage 新增「参数扫描」Tab + Plotly recall-QPS 散点 + 帕累托前沿"
-        },
-        {
-          "id": "M1.D1.frontend",
-          "owner": "main-agent",
-          "status": "done",
-          "commit": "85dedc9",
-          "desc": "参数扫描 Tab 内嵌交互层（滑块 + 散点反查 + 右侧实时 Top-K）"
-        },
-        {
-          "id": "M1.release",
-          "owner": "main-agent",
-          "status": "in_progress",
-          "desc": "alembic upgrade head + 真实 sweep 数据回填 §7 + CHANGELOG + README, 打 v1.2.0-alpha.1"
+          "commit": "3ee988c",
+          "desc": "matplotlib PNG 导出器 + pareto_pca30.png"
         }
       ]
     },
     {
       "id": "M2",
       "name": "算法可视化 + 单细胞独家性",
-      "status": "pending",
+      "status": "code_complete_pending_release",
       "tag": "v1.2.0-alpha.2",
       "tasks": [
         {
           "id": "M2.D2.full",
           "owner": "subagent-M2-alpha",
-          "status": "pending",
-          "desc": "HnswlibBackend.get_local_subgraph + GET /indexes/{id}/subgraph + IndexGraphPage.tsx"
+          "status": "done",
+          "commit": "1cc26b0",
+          "desc": "HnswlibBackend.get_local_subgraph + GET /indexes/{id}/subgraph + IndexGraphPage.tsx 474 行"
         },
         {
           "id": "M2.C5.full",
           "owner": "subagent-M2-beta",
-          "status": "pending",
-          "desc": "SparseBruteBackend + 工厂注册 + dataset.vector_format migration + preprocess raw_sparse + benchmark §7"
+          "status": "done",
+          "commit": "2a0f928",
+          "desc": "SparseBruteBackend 230 行 + factory 注册 + dataset.vector_format migration + preprocess raw_sparse + benchmark §8 + 4 sparse tests"
         },
         {
           "id": "M2.release",
           "owner": "main-agent",
-          "status": "pending",
-          "desc": "PPT 加 HNSW 图 + 稀疏页, 视频补录, 打 v1.2.0-alpha.2"
+          "status": "in_progress",
+          "desc": "CHANGELOG + README + tag v1.2.0-alpha.2"
         }
       ]
     },
     {
       "id": "M3",
       "name": "跨数据集深度 + Agent 升级",
-      "status": "pending",
+      "status": "in_progress",
       "tag": "v1.2.0",
       "tasks": [
         {
           "id": "M3.D7.full",
           "owner": "subagent-M3-alpha",
-          "status": "pending",
-          "desc": "alignment.py (intersect_only + harmony) + POST /datasets/align + multi-dataset 改用 aligned 索引 + benchmark §8"
+          "status": "in_progress",
+          "desc": "alignment.py (intersect_only + harmony) + AlignedDataset model + POST /datasets/align + multi-dataset 改用 aligned 索引 + benchmark §9"
         },
         {
           "id": "M3.D4.full",
           "owner": "subagent-M3-beta",
-          "status": "pending",
-          "desc": "rag.py 重构为 tool calling Agent + 工具 schema + 4 个 LLM client 适配 + RagChatPage 气泡 UI + rag_session/rag_message migration"
+          "status": "in_progress",
+          "desc": "rag.py 重构为 tool calling Agent + rag_tools.py + 4 个 LLM client 适配 chat_with_tools + RagSession/RagMessage migration + RagChatPage 气泡 UI"
         },
         {
           "id": "M3.release",
