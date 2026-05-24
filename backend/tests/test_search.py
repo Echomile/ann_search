@@ -781,3 +781,323 @@ async def test_ensemble_different_dataset_rejected(
     detail = resp.json()["detail"]
     assert str(other_index_id) in detail
     assert "数据集" in detail
+
+
+# ---------------------------------------------------------------------------
+# D1 交互式参数仪表盘端到端测试：POST /search/with_params
+# ---------------------------------------------------------------------------
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+from app.services.ann.factory import create_backend  # noqa: E402
+
+
+@asynccontextmanager
+async def _make_param_env(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    backend_name: str,
+    dim: int,
+    n: int,
+    metric: str = "l2",
+    build_params: dict | None = None,
+    seed: int = 0,
+):
+    """构建带指定 backend 的 ``/with_params`` 测试环境。
+
+    Yields:
+        ``(client, headers, dataset_id, index_id, backend)``。
+        ``backend`` 直接暴露给测试用于 ``IndexCache.peek`` 后的状态断言。
+    """
+    monkeypatch.setattr(search_cache, "_get_client", lambda: None)
+    search_cache.reset_cache_metrics()
+    IndexCache.instance().clear()
+    search_service.clear_dataset_cache()
+
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_maker = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        autoflush=False,
+        autocommit=False,
+        expire_on_commit=False,
+    )
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with session_maker() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    rng = np.random.default_rng(seed)
+    vectors = rng.normal(size=(n, dim)).astype(np.float32)
+    dataset_dir = tmp_path / f"ds_param_{backend_name}_{seed}"
+    dataset_dir.mkdir()
+    np.save(dataset_dir / "vectors.npy", vectors)
+    cell_ids = [f"c{i:04d}" for i in range(n)]
+    with open(dataset_dir / "cell_ids.json", "w", encoding="utf-8") as fp:
+        json.dump(cell_ids, fp)
+    pd.DataFrame({"cell_type": ["T"] * n}).to_csv(dataset_dir / "metadata.csv", index=False)
+
+    backend = create_backend(backend_name, dim=dim, metric=metric)
+    backend.build(vectors, **(build_params or {}))
+
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+            reg = await ac.post(
+                "/api/v1/auth/register",
+                json={"username": f"param_{backend_name}_{seed}", "password": "param_pw_123"},
+            )
+            assert reg.status_code == 201, reg.text
+            login = await ac.post(
+                "/api/v1/auth/login",
+                data={"username": f"param_{backend_name}_{seed}", "password": "param_pw_123"},
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+            async with session_maker() as session:
+                user = (
+                    await session.execute(
+                        select(User).where(User.username == f"param_{backend_name}_{seed}")
+                    )
+                ).scalar_one()
+                dataset = Dataset(
+                    owner_id=user.id,
+                    name=f"param_ds_{backend_name}",
+                    h5ad_path=str(tmp_path / f"fake_{backend_name}.h5ad"),
+                    vectors_path=str(dataset_dir),
+                    status="ready",
+                    vector_dim=dim,
+                    cell_count=n,
+                )
+                session.add(dataset)
+                await session.commit()
+                await session.refresh(dataset)
+
+                record = IndexRecord(
+                    dataset_id=dataset.id,
+                    backend=backend_name,
+                    metric=metric,
+                    params=build_params or {},
+                    index_path=None,
+                    status="ready",
+                )
+                session.add(record)
+                await session.commit()
+                await session.refresh(record)
+                dataset_id = int(dataset.id)
+                record_id = int(record.id)
+
+            # 把已构建的后端预热进 IndexCache，省去 path 加载流程
+            IndexCache.instance()._cache[record_id] = backend
+
+            yield ac, headers, dataset_id, record_id, backend
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        IndexCache.instance().clear()
+        search_service.clear_dataset_cache()
+        await engine.dispose()
+
+
+async def test_search_with_params_hnswlib_ef_search(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """hnswlib：不同 ``ef_search`` 都能成功返回 Top-K，且 ``effective_params`` 正确回填。
+
+    采用对比断言：小 ef_search 与大 ef_search 同步得到 top_k 个 hits，
+    距离非递减；``effective_params`` 与请求一致，``ignored_params`` 为空；
+    至少其中一种 ef 设置会改变 Top-K 命中顺序或距离（数据足够大时极大概率成立）。
+    """
+    async with _make_param_env(
+        tmp_path,
+        monkeypatch,
+        backend_name="hnswlib",
+        dim=32,
+        n=600,
+        metric="l2",
+        build_params={"M": 8, "ef_construction": 50, "ef_search": 16},
+        seed=7,
+    ) as (ac, headers, dataset_id, index_id, _backend):
+        rng = np.random.default_rng(123)
+        query_vec = rng.normal(size=32).astype(np.float32).tolist()
+
+        results: dict[int, list[dict]] = {}
+        for ef in (8, 256):
+            resp = await ac.post(
+                "/api/v1/search/with_params",
+                headers=headers,
+                json={
+                    "dataset_id": dataset_id,
+                    "index_id": index_id,
+                    "vector": query_vec,
+                    "top_k": 10,
+                    "runtime_params": {"ef_search": ef},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["dataset_id"] == dataset_id
+            assert body["top_k"] == 10
+            assert len(body["hits"]) == 10
+            assert body["index_backend"] == "hnswlib"
+            assert body["effective_params"] == {"ef_search": ef}
+            assert body["ignored_params"] == []
+            distances = [hit["distance"] for hit in body["hits"]]
+            assert distances == sorted(distances)
+            results[ef] = body["hits"]
+
+        # 较大的 ef_search 在召回上应不劣于较小的：top-k 距离和单调非增（容差 1e-4）
+        dist_low = sum(h["distance"] for h in results[8])
+        dist_high = sum(h["distance"] for h in results[256])
+        assert dist_high <= dist_low + 1e-4, (
+            f"ef_search=256 总距离 {dist_high} 应 <= ef_search=8 总距离 {dist_low}"
+        )
+
+
+async def test_search_with_params_faiss_ivfpq_nprobe(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """faiss-ivfpq：``nprobe`` 越大召回越高，``Top-K`` 距离和应单调非增。"""
+    async with _make_param_env(
+        tmp_path,
+        monkeypatch,
+        backend_name="faiss-ivfpq",
+        dim=32,
+        n=600,
+        metric="l2",
+        build_params={"nlist": 32, "m": 8, "nbits": 8, "nprobe": 1},
+        seed=11,
+    ) as (ac, headers, dataset_id, index_id, _backend):
+        rng = np.random.default_rng(321)
+        query_vec = rng.normal(size=32).astype(np.float32).tolist()
+
+        dist_sums: dict[int, float] = {}
+        for nprobe in (1, 16):
+            resp = await ac.post(
+                "/api/v1/search/with_params",
+                headers=headers,
+                json={
+                    "dataset_id": dataset_id,
+                    "index_id": index_id,
+                    "vector": query_vec,
+                    "top_k": 10,
+                    "runtime_params": {"nprobe": nprobe},
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            body = resp.json()
+            assert body["index_backend"] == "faiss-ivfpq"
+            assert body["effective_params"] == {"nprobe": nprobe}
+            assert body["ignored_params"] == []
+            assert len(body["hits"]) == 10
+            dist_sums[nprobe] = sum(hit["distance"] for hit in body["hits"])
+
+        assert dist_sums[16] <= dist_sums[1] + 1e-4, (
+            f"nprobe=16 总距离 {dist_sums[16]} 应 <= nprobe=1 总距离 {dist_sums[1]}"
+        )
+
+
+async def test_search_with_params_brute_ignores_params(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """brute 后端不支持任何 runtime 参数，传入的 key 应全进入 ``ignored_params``。"""
+    async with _make_param_env(
+        tmp_path,
+        monkeypatch,
+        backend_name="brute",
+        dim=8,
+        n=100,
+        metric="l2",
+        seed=0,
+    ) as (ac, headers, dataset_id, index_id, _backend):
+        resp = await ac.post(
+            "/api/v1/search/with_params",
+            headers=headers,
+            json={
+                "dataset_id": dataset_id,
+                "index_id": index_id,
+                "cell_id": "c0001",
+                "top_k": 5,
+                "runtime_params": {"ef_search": 200, "nprobe": 32, "unknown_key": 1},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["index_backend"] == "brute"
+        assert body["effective_params"] == {}
+        assert sorted(body["ignored_params"]) == sorted(["ef_search", "nprobe", "unknown_key"])
+        assert len(body["hits"]) == 5
+        assert all(hit["cell_id"] != "c0001" for hit in body["hits"])
+
+
+async def test_search_with_params_restores_state(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """调用 ``/with_params`` 后再普通 ``/by-vector``，缓存 backend 的 ``ef_search`` 应恢复到原值。"""
+    async with _make_param_env(
+        tmp_path,
+        monkeypatch,
+        backend_name="hnswlib",
+        dim=16,
+        n=200,
+        metric="l2",
+        build_params={"M": 8, "ef_construction": 50, "ef_search": 32},
+        seed=3,
+    ) as (ac, headers, dataset_id, index_id, backend):
+        original_ef = int(backend._ef_search)
+        assert original_ef == 32
+
+        rng = np.random.default_rng(5)
+        query_vec = rng.normal(size=16).astype(np.float32).tolist()
+
+        # 1) 调一次 with_params 把 ef_search 临时改成 256
+        resp = await ac.post(
+            "/api/v1/search/with_params",
+            headers=headers,
+            json={
+                "dataset_id": dataset_id,
+                "index_id": index_id,
+                "vector": query_vec,
+                "top_k": 5,
+                "runtime_params": {"ef_search": 256},
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["effective_params"] == {"ef_search": 256}
+
+        # 2) 缓存中的 backend 应已被恢复
+        cached = IndexCache.instance().peek(index_id)
+        assert cached is backend
+        assert int(backend._ef_search) == original_ef, (
+            f"with_params 结束后 ef_search 未恢复: 当前 {backend._ef_search}, 原值 {original_ef}"
+        )
+
+        # 3) 再发普通 by-vector，验证 backend 状态仍正常工作且仍是原 ef
+        resp2 = await ac.post(
+            "/api/v1/search/by-vector",
+            headers=headers,
+            json={
+                "dataset_id": dataset_id,
+                "index_id": index_id,
+                "vector": query_vec,
+                "top_k": 5,
+            },
+        )
+        assert resp2.status_code == 200, resp2.text
+        assert len(resp2.json()["hits"]) == 5
+        assert int(backend._ef_search) == original_ef

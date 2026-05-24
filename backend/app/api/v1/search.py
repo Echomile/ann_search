@@ -29,6 +29,8 @@ from app.schemas.search import (
     SearchByVector,
     SearchHit,
     SearchResponse,
+    SearchResponseWithParams,
+    SearchWithParamsRequest,
 )
 from app.services import search as search_service
 
@@ -374,7 +376,7 @@ def _events_to_streaming_response(
     description=(
         "Server-Sent Events 版 ``by-vector`` 检索：服务端先用 ANN 计算 Top-K hits，"
         "再按 rank 顺序逐条推送 ``event: hit``，每条间隔约 20ms 以改善前端"
-        "\"等结果出来才刷新\"的卡顿感；最后一条为 ``event: done``，"
+        '"等结果出来才刷新"的卡顿感；最后一条为 ``event: done``，'
         "携带 ``latency_ms`` / ``total_candidates`` 等汇总信息。"
         "\n\n"
         "客户端建议通过 ``fetch + ReadableStream`` 自行解析（``EventSource`` 不支持 POST）。"
@@ -587,13 +589,15 @@ async def search_batch_endpoint(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"数据集不存在: {payload.dataset_id}"
         )
-    record = await _get_index_record(
-        db, dataset_id=payload.dataset_id, index_id=payload.index_id
-    )
+    record = await _get_index_record(db, dataset_id=payload.dataset_id, index_id=payload.index_id)
 
     if dataset.vector_dim:
         for i, item in enumerate(payload.queries):
-            if item.cell_id is None and item.vector is not None and len(item.vector) != dataset.vector_dim:
+            if (
+                item.cell_id is None
+                and item.vector is not None
+                and len(item.vector) != dataset.vector_dim
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=(
@@ -855,4 +859,77 @@ async def search_ensemble(
         latency_ms=latency_ms,
         hits=hits,
         per_index_latency_ms=per_index_latency,
+    )
+
+
+@router.post(
+    "/with_params",
+    response_model=SearchResponseWithParams,
+    summary="带运行时参数调整的检索",
+    description=(
+        "在 by-id / by-vector 之上多接受一个 ``runtime_params: dict``，"
+        "用于运行时调整 ANN 后端参数（如 ``ef_search`` / ``nprobe``），"
+        "**不重建索引**，立即返回 Top-K。\n\n"
+        "支持矩阵：\n"
+        "- ``hnswlib`` / ``adaptive-hnsw`` / ``faiss-hnsw``: ``ef_search``\n"
+        "- ``faiss-ivfpq``: ``nprobe``\n"
+        "- ``brute``: 全部忽略\n\n"
+        "查询源 ``cell_id`` 与 ``vector`` 二选一；不被当前后端支持或类型非法"
+        "的参数会落入 ``ignored_params``，实际生效值回填 ``effective_params``。"
+        "调用结束后参数会被恢复到原值，避免污染缓存供下次普通查询使用。\n\n"
+        "**并发限制**：IndexCache 是进程内单例，多请求共享同一 backend；两个 "
+        "``/with_params`` 并发时参数会互相覆盖，第一版可接受（参数仪表盘多为单用户拖拽场景），"
+        "未来可在外层加锁。\n\n"
+        "适用场景：参数仪表盘的实时 Top-K 预览。"
+    ),
+)
+async def search_with_params(
+    payload: SearchWithParamsRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> SearchResponseWithParams:
+    """D1 交互式参数仪表盘后端入口：临时调参 + Top-K 预览。"""
+    dataset = await _get_dataset(db, payload.dataset_id)
+    record = await _get_index_record(db, dataset_id=payload.dataset_id, index_id=payload.index_id)
+    if (
+        payload.vector is not None
+        and dataset.vector_dim
+        and len(payload.vector) != dataset.vector_dim
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(f"向量维度 {len(payload.vector)} 与数据集维度 {dataset.vector_dim} 不一致"),
+        )
+
+    dataset_dir = _resolve_dataset_dir(dataset)
+    backend = _load_backend(dataset, record, dataset_dir)
+
+    try:
+        result, effective, ignored = await search_service.async_search_with_runtime_params(
+            query_cell_id=payload.cell_id,
+            query_vector=payload.vector,
+            dataset_dir=dataset_dir,
+            backend=backend,
+            top_k=payload.top_k,
+            runtime_params=payload.runtime_params,
+            filters=payload.filters,
+            metric=record.metric,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    await _log_search(
+        db,
+        dataset_id=payload.dataset_id,
+        user_id=current_user.id,
+        top_k=payload.top_k,
+        filters={"with_params": True, **(payload.filters or {})},
+        latency_ms=float(result.get("query_time_ms", 0.0)),
+    )
+
+    base = _build_response(payload.dataset_id, result, payload.top_k)
+    return SearchResponseWithParams(
+        **base.model_dump(),
+        effective_params=effective,
+        ignored_params=ignored,
     )

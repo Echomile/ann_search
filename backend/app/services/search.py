@@ -561,9 +561,7 @@ def merge_ensemble_results(
         distances = np.array([h["distance"] for h in hits], dtype=np.float64)
         mean = float(distances.mean())
         std = float(distances.std())
-        normalized = (
-            np.zeros_like(distances) if std <= 1e-12 else (distances - mean) / std
-        )
+        normalized = np.zeros_like(distances) if std <= 1e-12 else (distances - mean) / std
         for hit, z_score in zip(hits, normalized, strict=False):
             cid = hit["cell_id"]
             current = aggregated.get(cid)
@@ -631,3 +629,242 @@ def merge_multi_dataset_results(
     for i, item in enumerate(final, start=1):
         item["rank"] = i
     return final
+
+
+# ---------------------------------------------------------------------------
+# D1: 运行时参数调整（参数仪表盘）
+# ---------------------------------------------------------------------------
+
+_RUNTIME_PARAM_SUPPORT: dict[str, frozenset[str]] = {
+    "hnswlib": frozenset({"ef_search"}),
+    "adaptive-hnsw": frozenset({"ef_search"}),
+    "faiss-hnsw": frozenset({"ef_search"}),
+    "faiss-ivfpq": frozenset({"nprobe"}),
+    "brute": frozenset(),
+}
+
+
+def _coerce_int(value: Any) -> int | None:
+    """安全地把任意 runtime_params 值转成正整数；失败返回 ``None``。"""
+    try:
+        out = int(value)
+    except (TypeError, ValueError):
+        return None
+    if out <= 0:
+        return None
+    return out
+
+
+def _apply_one_runtime_param(backend: Any, key: str, value: Any) -> tuple[Any, Any] | None:
+    """对单个 key 应用 runtime 参数到 ``backend``。
+
+    Args:
+        backend: 已加载的 :class:`IndexBackend` 实例。
+        key: 参数名（如 ``ef_search`` / ``nprobe``）。
+        value: 期望生效的新值；非正整数或类型异常时返回 ``None``。
+
+    Returns:
+        tuple[Any, Any] | None: ``(effective_value, restore_payload)``。
+            ``restore_payload`` 是 :func:`_restore_one_runtime_param` 使用的私有载荷。
+            参数无法应用（如后端未初始化、值非法）时返回 ``None``，
+            调用方应将该 key 归入 ``ignored_params``。
+    """
+    name = getattr(backend, "name", backend.__class__.__name__)
+    new_val = _coerce_int(value)
+    if new_val is None:
+        return None
+
+    if key == "ef_search":
+        if name == "hnswlib":
+            if backend._index is None:
+                return None
+            orig = int(backend._ef_search)
+            backend.set_ef(new_val)
+            return new_val, ("hnswlib_set_ef", orig)
+        if name == "adaptive-hnsw":
+            # adaptive-hnsw 的 search 内部会自适应调整 ef，结束后重置回 min_ef；
+            # 因此 runtime 的 ef_search 映射到 min_ef 起步值才会真正影响结果。
+            orig = int(backend.min_ef)
+            backend.min_ef = new_val
+            return new_val, ("adaptive_min_ef", orig)
+        if name == "faiss-hnsw":
+            if backend._index is None:
+                return None
+            orig = int(backend._index.hnsw.efSearch)
+            backend._index.hnsw.efSearch = new_val
+            return new_val, ("faiss_hnsw_ef", orig)
+        return None
+
+    if key == "nprobe":
+        if name == "faiss-ivfpq":
+            if backend._index is None:
+                return None
+            orig = int(backend._nprobe)
+            backend._index.nprobe = new_val
+            backend._nprobe = new_val
+            return new_val, ("ivfpq_nprobe", orig)
+        return None
+
+    return None
+
+
+def _restore_one_runtime_param(backend: Any, payload: tuple[str, Any]) -> None:
+    """恢复 :func:`_apply_one_runtime_param` 改动过的单个属性。"""
+    kind, orig = payload
+    try:
+        if kind == "hnswlib_set_ef":
+            backend.set_ef(int(orig))
+        elif kind == "adaptive_min_ef":
+            backend.min_ef = int(orig)
+        elif kind == "faiss_hnsw_ef":
+            if backend._index is not None:
+                backend._index.hnsw.efSearch = int(orig)
+        elif kind == "ivfpq_nprobe":
+            if backend._index is not None:
+                backend._index.nprobe = int(orig)
+            backend._nprobe = int(orig)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("恢复 runtime_param 失败 kind=%s err=%s", kind, exc)
+
+
+def apply_runtime_params(
+    backend: Any, params: dict[str, Any]
+) -> tuple[dict[str, Any], list[str], list[tuple[str, Any]]]:
+    """把 ``runtime_params`` 应用到 ``backend`` 并返回恢复信息。
+
+    并发限制 (limitation):
+        :class:`IndexCache` 是进程内单例，多请求共享同一个 backend 实例。
+        两个 ``/with_params`` 请求并发时，参数会互相覆盖且 ``finally`` 顺序
+        难以保证。第一版可接受（参数仪表盘多为单用户拖拽场景），未来如需要
+        严格隔离可在该函数外加 :class:`asyncio.Lock` 或为每路请求构造独立 backend。
+
+    Args:
+        backend: 已加载的 :class:`IndexBackend` 实例。
+        params: 用户期望生效的运行时参数字典；空字典表示不调整。
+
+    Returns:
+        tuple[dict[str, Any], list[str], list[tuple[str, Any]]]:
+            ``(effective_params, ignored_params, restore_payloads)``。
+            ``restore_payloads`` 按应用顺序排列，调用方在 ``finally`` 中
+            **倒序** 传给 :func:`restore_runtime_params` 复原后端。
+    """
+    name = getattr(backend, "name", backend.__class__.__name__)
+    supported = _RUNTIME_PARAM_SUPPORT.get(name, frozenset())
+    effective: dict[str, Any] = {}
+    ignored: list[str] = []
+    restores: list[tuple[str, Any]] = []
+    for key, value in params.items():
+        if key not in supported:
+            ignored.append(key)
+            continue
+        outcome = _apply_one_runtime_param(backend, key, value)
+        if outcome is None:
+            ignored.append(key)
+            continue
+        eff_val, payload = outcome
+        effective[key] = eff_val
+        restores.append(payload)
+    return effective, ignored, restores
+
+
+def restore_runtime_params(backend: Any, restores: list[tuple[str, Any]]) -> None:
+    """按倒序恢复 :func:`apply_runtime_params` 记录的所有改动。"""
+    for payload in reversed(restores):
+        _restore_one_runtime_param(backend, payload)
+
+
+def search_with_runtime_params(
+    *,
+    query_cell_id: str | None,
+    query_vector: list[float] | np.ndarray | None,
+    dataset_dir: str,
+    backend: Any,
+    top_k: int,
+    runtime_params: dict[str, Any] | None = None,
+    filters: dict[str, Any] | None = None,
+    metric: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """带运行时参数调整的检索（同步实现）。
+
+    流程：``apply_runtime_params`` → ``search_by_cell_id`` / ``search_by_vector``
+    → ``finally: restore_runtime_params``。整段在调用方线程中串行执行，
+    保证单次调用内 apply / search / restore 原子。
+
+    Args:
+        query_cell_id: 查询细胞 ID，与 ``query_vector`` 二选一。
+        query_vector: 查询向量，与 ``query_cell_id`` 二选一。
+        dataset_dir: 数据集制品目录。
+        backend: 已加载的 :class:`IndexBackend` 实例。
+        top_k: 返回近邻数量。
+        runtime_params: 期望生效的运行时参数；空表示不调整。
+        filters: metadata 过滤条件。
+        metric: 距离度量，用于响应回填。
+
+    Returns:
+        tuple[dict[str, Any], dict[str, Any], list[str]]:
+            ``(search_result, effective_params, ignored_params)``，
+            ``search_result`` 形如 :func:`search_with_backend` 输出。
+
+    Raises:
+        ValueError: ``query_cell_id`` 与 ``query_vector`` 同时为空。
+        KeyError: ``query_cell_id`` 不存在于数据集。
+    """
+    if query_cell_id is None and query_vector is None:
+        raise ValueError("query_cell_id 与 query_vector 必须二选一")
+    effective, ignored, restores = apply_runtime_params(backend, runtime_params or {})
+    try:
+        if query_cell_id is not None:
+            result = search_by_cell_id(
+                query_cell_id=query_cell_id,
+                dataset_dir=dataset_dir,
+                backend=backend,
+                top_k=top_k,
+                filters=filters,
+                metric=metric,
+            )
+        else:
+            result = search_by_vector(
+                query_vector=query_vector,
+                dataset_dir=dataset_dir,
+                backend=backend,
+                top_k=top_k,
+                filters=filters,
+                exclude_cell_id=None,
+                metric=metric,
+            )
+        return result, effective, ignored
+    finally:
+        restore_runtime_params(backend, restores)
+
+
+async def async_search_with_runtime_params(
+    *,
+    query_cell_id: str | None,
+    query_vector: list[float] | np.ndarray | None,
+    dataset_dir: str,
+    backend: Any,
+    top_k: int,
+    runtime_params: dict[str, Any] | None = None,
+    filters: dict[str, Any] | None = None,
+    metric: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """:func:`search_with_runtime_params` 的异步包装。
+
+    apply / search / restore 全部在同一个 :func:`asyncio.to_thread` 内执行，
+    保证单次调用的原子性；并发请求共享 backend 实例的限制详见
+    :func:`apply_runtime_params` 的注释。
+    """
+
+    def _do() -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+        return search_with_runtime_params(
+            query_cell_id=query_cell_id,
+            query_vector=query_vector,
+            dataset_dir=dataset_dir,
+            backend=backend,
+            top_k=top_k,
+            runtime_params=runtime_params,
+            filters=filters,
+            metric=metric,
+        )
+
+    return await asyncio.to_thread(_do)

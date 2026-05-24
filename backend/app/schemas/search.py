@@ -107,9 +107,7 @@ class BatchSearchRequest(BaseModel):
     index_id: int | None = Field(
         None, description="指定使用的索引 ID；为空时自动取最新 ``status=ready`` 索引"
     )
-    queries: list[BatchQueryItem] = Field(
-        ..., min_length=1, description="查询项列表，长度 1~50"
-    )
+    queries: list[BatchQueryItem] = Field(..., min_length=1, description="查询项列表，长度 1~50")
     top_k: int = Field(10, ge=1, le=1000, description="每个查询返回的近邻数量")
     filters: dict[str, Any] | None = Field(None, description="所有查询共享的 metadata 过滤条件")
 
@@ -185,4 +183,55 @@ class EnsembleSearchResponse(BaseModel):
     per_index_latency_ms: dict[str, float] = Field(
         default_factory=dict,
         description="各索引 ANN 计算耗时（毫秒），key 为 ``str(index_id)``",
+    )
+
+
+class SearchWithParamsRequest(BaseModel):
+    """带运行时参数调整的检索请求（D1 交互式参数仪表盘后端入参）。
+
+    在不重建索引的前提下，通过 ``runtime_params`` 临时调整后端的查询期参数
+    （例如 hnswlib 的 ``ef_search`` 或 faiss-ivfpq 的 ``nprobe``），返回新的
+    Top-K，便于前端"参数滑块 -> 实时预览"交互。``cell_id`` 与 ``vector``
+    二选一。
+    """
+
+    dataset_id: int = Field(..., description="数据集 ID")
+    index_id: int | None = Field(
+        None, description="指定使用的索引 ID；为空时取最新 ``status=ready`` 索引"
+    )
+    cell_id: str | None = Field(None, description="查询细胞编号，与 ``vector`` 二选一")
+    vector: list[float] | None = Field(
+        None, description="查询向量；长度需与数据集维度一致，与 ``cell_id`` 二选一"
+    )
+    top_k: int = Field(10, ge=1, le=1000, description="返回近邻数量")
+    runtime_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "运行时后端参数；按后端支持的 key 生效：``ef_search``"
+            "（hnswlib / adaptive-hnsw / faiss-hnsw）、``nprobe``（faiss-ivfpq）。"
+            "不支持的 key 会落入响应的 ``ignored_params``。"
+        ),
+    )
+    filters: dict[str, Any] | None = Field(
+        None, description="metadata 过滤条件（与 by-id / by-vector 同语义）"
+    )
+
+    @model_validator(mode="after")
+    def _check_query_source(self) -> SearchWithParamsRequest:
+        """校验 ``cell_id`` 与 ``vector`` 至少给出一项。"""
+        if self.cell_id is None and self.vector is None:
+            raise ValueError("cell_id 与 vector 必须二选一")
+        return self
+
+
+class SearchResponseWithParams(SearchResponse):
+    """``/search/with_params`` 响应：在标准 :class:`SearchResponse` 基础上回填实际生效的参数。"""
+
+    effective_params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="本次检索实际生效的 runtime 参数（如 ``{'ef_search': 128}``）",
+    )
+    ignored_params: list[str] = Field(
+        default_factory=list,
+        description="被忽略的参数 key 列表（不被当前后端支持，或类型转换失败）",
     )
