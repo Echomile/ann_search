@@ -327,7 +327,15 @@ const SweepTab = ({ defaultDatasetId }: SweepTabProps) => {
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Card title="参数扫描配置" size="small">
-        <Form form={form} layout="vertical" initialValues={{ top_k: 10, query_count: 200 }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{
+            top_k: 10,
+            query_count: 200,
+            backends: SWEEPABLE_BACKENDS.map((b) => b.value),
+          }}
+        >
           <Row gutter={16}>
             <Col xs={24} md={6}>
               <Form.Item label="数据集" name="dataset_id" rules={[{ required: true }]}>
@@ -348,7 +356,6 @@ const SweepTab = ({ defaultDatasetId }: SweepTabProps) => {
                     label: `${b.label} (扫 ${b.param})`,
                     value: b.value,
                   }))}
-                  defaultValue={SWEEPABLE_BACKENDS.map((b) => b.value)}
                 />
               </Form.Item>
             </Col>

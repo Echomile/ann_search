@@ -41,6 +41,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    setupFiles: ['./src/test-utils/setup.ts'],
     coverage: {
       reporter: ['text', 'html'],
       exclude: ['src/**/*.test.*', 'src/**/index.ts'],
