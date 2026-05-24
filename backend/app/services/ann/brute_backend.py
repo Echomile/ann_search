@@ -120,9 +120,7 @@ class BruteBackend(IndexBackend):
             return 1.0 - query @ self._vectors.T
         return -(query @ self._vectors.T)
 
-    def _search_l2_numba(
-        self, query: np.ndarray, top_k: int
-    ) -> tuple[np.ndarray, np.ndarray]:
+    def _search_l2_numba(self, query: np.ndarray, top_k: int) -> tuple[np.ndarray, np.ndarray]:
         """numba 加速版的 ``l2`` 距离 top-k 检索（按 query 循环外、内部 prange 并行）。
 
         每条 query 进入 :func:`_l2_sq_dists_numba` 并行计算到全部底库的平方距离，

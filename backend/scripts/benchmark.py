@@ -316,8 +316,7 @@ def measure_backend(
             "hot_seconds": float(hot_seconds),
         }
         print(
-            f"[{name}] numba JIT warmup={jit_seconds * 1000:.1f}ms "
-            f"hot={hot_seconds * 1000:.2f}ms",
+            f"[{name}] numba JIT warmup={jit_seconds * 1000:.1f}ms hot={hot_seconds * 1000:.2f}ms",
             flush=True,
         )
     elif name == "brute":

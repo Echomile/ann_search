@@ -196,7 +196,9 @@ def preprocess_h5ad(h5ad_path: str | Path, dataset_dir: str | Path) -> dict[str,
 
     dtype_key = (settings.VECTORS_DTYPE or "float32").lower()
     save_dtype = _DTYPE_MAP.get(dtype_key, np.float32)
-    vectors_to_save = vectors if save_dtype == np.float32 else vectors.astype(save_dtype, copy=False)
+    vectors_to_save = (
+        vectors if save_dtype == np.float32 else vectors.astype(save_dtype, copy=False)
+    )
 
     vectors_path = out_dir / "vectors.npy"
     np.save(vectors_path, vectors_to_save)

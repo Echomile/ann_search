@@ -225,7 +225,10 @@ async def _seed_dataset_and_logs(
     base = datetime.now(tz=UTC) - timedelta(minutes=count)
     async with _TestSessionLocal() as session:
         ds = Dataset(
-            owner_id=user_id, name=dataset_name, h5ad_path=f"/tmp/{dataset_name}.h5ad", status="ready"
+            owner_id=user_id,
+            name=dataset_name,
+            h5ad_path=f"/tmp/{dataset_name}.h5ad",
+            status="ready",
         )
         session.add(ds)
         await session.flush()

@@ -164,11 +164,7 @@ async def list_dataset_indexes(
     Returns:
         list[IndexRecordOut]: 按创建时间倒序的索引列表。
     """
-    stmt = (
-        select(Dataset)
-        .options(joinedload(Dataset.indexes))
-        .where(Dataset.id == dataset_id)
-    )
+    stmt = select(Dataset).options(joinedload(Dataset.indexes)).where(Dataset.id == dataset_id)
     dataset = (await db.execute(stmt)).unique().scalar_one_or_none()
     if dataset is None or dataset.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="数据集不存在")

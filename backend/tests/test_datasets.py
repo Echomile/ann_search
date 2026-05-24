@@ -507,9 +507,7 @@ async def test_list_dataset_indexes_no_n_plus_one(
     adata.write_h5ad(str(h5ad_path))
 
     headers = await _login(http_client, "n1user", "n1pass00")
-    dataset_id = await _seed_dataset_with_indexes(
-        http_client, headers, h5ad_path, n_indexes=5
-    )
+    dataset_id = await _seed_dataset_with_indexes(http_client, headers, h5ad_path, n_indexes=5)
 
     with _capture_select_sql() as statements:
         resp = await http_client.get(
@@ -519,13 +517,9 @@ async def test_list_dataset_indexes_no_n_plus_one(
     assert resp.status_code == 200, resp.text
     assert len(resp.json()) == 5
 
-    target = [
-        s
-        for s in statements
-        if "datasets" in s.lower() or "index_records" in s.lower()
-    ]
-    assert len(target) == 1, (
-        f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(target)
+    target = [s for s in statements if "datasets" in s.lower() or "index_records" in s.lower()]
+    assert len(target) == 1, f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(
+        target
     )
     joined = target[0].lower()
     assert "index_records" in joined and "datasets" in joined, (
@@ -561,9 +555,7 @@ async def test_get_index_status_no_n_plus_one(
     adata.write_h5ad(str(h5ad_path))
 
     headers = await _login(http_client, "n2user", "n2pass00")
-    dataset_id = await _seed_dataset_with_indexes(
-        http_client, headers, h5ad_path, n_indexes=1
-    )
+    dataset_id = await _seed_dataset_with_indexes(http_client, headers, h5ad_path, n_indexes=1)
     async with _TestSessionLocal() as session:
         row = await session.execute(
             select(IndexRecord.id).where(IndexRecord.dataset_id == dataset_id)
@@ -577,13 +569,9 @@ async def test_get_index_status_no_n_plus_one(
         )
     assert resp.status_code == 200, resp.text
 
-    target = [
-        s
-        for s in statements
-        if "datasets" in s.lower() or "index_records" in s.lower()
-    ]
-    assert len(target) == 1, (
-        f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(target)
+    target = [s for s in statements if "datasets" in s.lower() or "index_records" in s.lower()]
+    assert len(target) == 1, f"期望 1 条联合查询，实际 {len(target)} 条 SQL：\n" + "\n---\n".join(
+        target
     )
     joined = target[0].lower()
     assert "datasets" in joined and "index_records" in joined, (
