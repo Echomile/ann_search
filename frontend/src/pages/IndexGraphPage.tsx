@@ -25,6 +25,7 @@ import type { Dataset } from '@/types/dataset';
 import type { IndexRecord } from '@/types/indexRecord';
 import type { SubgraphNode, SubgraphResponse } from '@/types/subgraph';
 import PlotlyChart, { type PlotlyData } from '@/components/PlotlyChart';
+import { CellIdAutoComplete } from '@/components/CellIdAutoComplete';
 import { extractError } from '@/utils/error';
 
 const { Title, Paragraph, Text } = Typography;
@@ -170,6 +171,7 @@ const IndexGraphPage = () => {
   const presetIndexId = Number(id || searchParams.get('index_id') || 0) || null;
 
   const [form] = Form.useForm<FormValues>();
+  const watchedDatasetId = Form.useWatch('dataset_id', form);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [indexes, setIndexes] = useState<IndexRecord[]>([]);
   const [loadingDatasets, setLoadingDatasets] = useState(false);
@@ -349,15 +351,9 @@ const IndexGraphPage = () => {
                 name="cell_id"
                 rules={[{ required: true, message: '请输入起点 cell_id' }]}
               >
-                <Select
-                  mode="tags"
-                  maxCount={1}
-                  placeholder="例如 c001"
-                  tokenSeparators={[',']}
-                  // antd Select tags mode 把数组写回字符串：onChange 内取首个
-                  onChange={(value: string[]) =>
-                    form.setFieldValue('cell_id', value[value.length - 1] ?? '')
-                  }
+                <CellIdAutoComplete
+                  datasetId={watchedDatasetId}
+                  placeholder="输入片段自动补全，例如 AAACCTGAGCAGGTCA-1_2"
                 />
               </Form.Item>
             </Col>

@@ -160,4 +160,12 @@ export const searchApi = {
     );
     return data;
   },
+
+  // cell_id 自动补全：按输入片段返回候选（前缀优先），供检索表单输入框使用
+  suggestCellIds: async (datasetId: number, q: string, limit = 20): Promise<string[]> => {
+    const { data } = await httpClient.get<string[]>('/search/cell-ids', {
+      params: { dataset_id: datasetId, q, limit },
+    });
+    return data;
+  },
 };

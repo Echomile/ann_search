@@ -121,7 +121,13 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
                 },
                 "filters": {
                     "type": "object",
-                    "description": '等值过滤条件，例如 {"cell_type": "T cell"}',
+                    "description": (
+                        '过滤条件，例如 {"cell_type": "hepatocyte"}。文本/类别字段按'
+                        "大小写不敏感的子串包含匹配（如 tissue=liver 可命中 "
+                        '"caudate lobe of liver"），数值字段按严格等值匹配。'
+                        "若只想了解数据集整体构成（有哪些细胞类型/组织及数量），"
+                        "传空对象 {} 即可获得全库概览统计。"
+                    ),
                     "additionalProperties": True,
                 },
                 "limit": {
@@ -382,7 +388,9 @@ async def tool_filter_cells(
         session: 异步数据库会话。
         user: 当前请求用户。
         dataset_id: 目标数据集 ID。
-        filters: 等值过滤条件字典，例如 ``{"cell_type": "T cell"}``。
+        filters: 过滤条件字典，例如 ``{"cell_type": "hepatocyte"}``。文本/类别列按
+            大小写不敏感的子串包含匹配，数值列按严格等值匹配。传入空字典 ``{}``
+            表示「全库概览」，返回总细胞数与 cell_type/tissue 分布。
         limit: 返回 cell_id 列表数量上限，默认 20，越界自动截断到 ``[1, 200]``。
 
     Returns:
@@ -393,12 +401,14 @@ async def tool_filter_cells(
     dataset, err = await _load_dataset_for_user(session, user, dataset_id)
     if err is not None or dataset is None:
         return {"error": err, "matched_count": 0, "cell_ids": []}
-    if not isinstance(filters, dict) or not filters:
+    if not isinstance(filters, dict):
         return {
-            "error": "filters 不能为空",
+            "error": "filters 必须是对象",
             "matched_count": 0,
             "cell_ids": [],
         }
+    # 空 filters 视为「全库概览」：不施加任何过滤，返回总细胞数与 cell_type/tissue 分布，
+    # 用于回答「这个数据集有哪些主要细胞类型」这类无需具体过滤值的问题。
     dataset_dir = _resolve_dataset_dir(dataset)
     if dataset_dir is None:
         return {
@@ -424,7 +434,20 @@ async def tool_filter_cells(
                     "cell_ids": [],
                     "filters": filters,
                 }
-            mask &= (metadata[col] == value).to_numpy()
+            col_series = metadata[col]
+            is_text = col_series.dtype == object or str(col_series.dtype).startswith("category")
+            if is_text:
+                # 文本/类别列做大小写不敏感的子串包含匹配，容忍 LLM 猜词与本体命名差异，
+                # 例如 tissue="liver" 命中 "caudate lobe of liver"/"right lobe of liver"。
+                col_mask = (
+                    col_series.astype(str)
+                    .str.contains(str(value), case=False, regex=False, na=False)
+                    .to_numpy()
+                )
+            else:
+                # 数值列保留严格等值匹配。
+                col_mask = (col_series == value).to_numpy()
+            mask &= col_mask
         indices = np.flatnonzero(mask)
         matched_count = int(indices.size)
         head = indices[:limit].tolist()

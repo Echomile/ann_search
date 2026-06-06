@@ -93,6 +93,32 @@ _KEYWORD_HINTS: dict[str, dict[str, list[str]]] = {
 }
 
 
+# 概览意图关键词：命中且已知 dataset_id 时，mock 走 filter_cells({}) 做全库统计，
+# 用于回答「数据集有哪些细胞类型 / 数据构成 / 各类型数量」这类无需具体过滤值的问题。
+_OVERVIEW_KEYWORDS: tuple[str, ...] = (
+    "有哪些",
+    "哪些细胞",
+    "细胞类型",
+    "细胞种类",
+    "细胞构成",
+    "细胞组成",
+    "数据构成",
+    "数据组成",
+    "组成",
+    "构成",
+    "概览",
+    "概况",
+    "分布",
+    "占比",
+    "多少种",
+    "包含哪些",
+    "cell type",
+    "cell types",
+    "overview",
+    "composition",
+)
+
+
 def _match_keyword(text: str, available_filters: list[str]) -> dict[str, str]:
     """按关键词词典在自然语言中匹配可用的 metadata 过滤值。"""
     matched: dict[str, str] = {}
@@ -401,7 +427,29 @@ class MockLLMClient:
                 ],
             )
 
-        # fallback：直接给提示
+        # 概览意图且 dataset_id 可知：调 filter_cells({}) 做全库概览，回答「有哪些细胞类型/数据构成」
+        if dataset_id and any(kw in text_lower for kw in _OVERVIEW_KEYWORDS):
+            return ChatResponse(
+                finish_reason="tool_calls",
+                tool_calls=[
+                    ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name="filter_cells",
+                        arguments={"dataset_id": dataset_id, "filters": {}, "limit": 20},
+                    )
+                ],
+            )
+
+        # fallback：dataset_id 已知时引导更具体的提问，未知时才请用户补充
+        if dataset_id:
+            return ChatResponse(
+                finish_reason="stop",
+                content=(
+                    f"我可以基于当前数据集（#{dataset_id}）帮你：概览细胞类型构成、"
+                    "按 cell_type / tissue 等条件筛选细胞、或按某个 cell_id 检索相似细胞。"
+                    "例如「这个数据集有哪些主要细胞类型」或「找和 cell_id=XXX 最相似的 10 个细胞」。"
+                ),
+            )
         return ChatResponse(
             finish_reason="stop",
             content=(
@@ -447,9 +495,22 @@ class MockLLMClient:
                     seg += f"，代表 cell_id {hits[0].get('cell_id')}"
                     parts.append(seg)
             if isinstance(result, dict) and "matched_count" in result:
-                parts.append(
-                    f"按过滤条件 {result.get('filters')} 命中 {result['matched_count']} 个细胞"
+                filters = result.get("filters") or {}
+                matched = result["matched_count"]
+                seg = (
+                    f"共 {matched} 个细胞"
+                    if not filters
+                    else f"按过滤条件 {filters} 命中 {matched} 个细胞"
                 )
+                ct_counts = result.get("cell_type_counts") or {}
+                if ct_counts:
+                    top_ct = "、".join(f"{k} ({v})" for k, v in list(ct_counts.items())[:5])
+                    seg += f"，主要细胞类型 {top_ct}"
+                ts_counts = result.get("tissue_counts") or {}
+                if ts_counts:
+                    top_ts = "、".join(f"{k} ({v})" for k, v in list(ts_counts.items())[:3])
+                    seg += f"，组织分布 {top_ts}"
+                parts.append(seg)
         if not parts:
             return f"已根据「{user_query}」检索完毕，但没有可总结的信息。"
         return "；".join(parts) + "。"
@@ -706,6 +767,163 @@ class AnthropicClient:
             return MockLLMClient().chat_with_tools(messages, tools)
 
 
+class OpenAICompatibleClient:
+    """基于 OpenAI Chat Completions 兼容协议的客户端。
+
+    通过可配置 ``base_url`` 对接任意 OpenAI 兼容端点：
+
+        - OpenAI 官方：``base_url`` 留空；
+        - Gemini：``https://generativelanguage.googleapis.com/v1beta/openai/``，
+          模型如 ``gemini-2.5-flash``（原生支持 function calling）；
+        - 其他兼容网关（vLLM / OneAPI / DeepSeek 等）同理。
+
+    内部维护的 ``messages`` 本就是 OpenAI 风格，可直接转发；``TOOLS_SCHEMA``
+    为 Anthropic 风格（``input_schema``），调用前转成 OpenAI 的
+    ``{type:"function", function:{parameters}}``。任意阶段失败均回退
+    到 :class:`MockLLMClient`，保证 RAG 始终可用。
+    """
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        base_url: str | None = None,
+        max_tokens: int = 2048,
+    ) -> None:
+        """初始化 OpenAI 兼容客户端。
+
+        Args:
+            model: 模型名，例如 ``gemini-2.5-flash`` / ``gpt-4o-mini``。
+            api_key: API Key（Gemini 用 Google AI Studio 的 key）。
+            base_url: OpenAI 兼容端点；为空走 SDK 默认（OpenAI 官方）。
+            max_tokens: 单次响应最大生成 token 数；含思考型模型时取稍大值更稳。
+
+        Raises:
+            RuntimeError: 缺少 API Key 或 openai SDK 不可用时抛出。
+        """
+        if not api_key:
+            raise RuntimeError("OpenAICompatibleClient 需要 LLM_API_KEY")
+        try:
+            from openai import OpenAI  # type: ignore  # noqa: PLC0415
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("缺少 openai SDK，请先安装 openai>=1.40") from exc
+        self.model = model
+        self._max_tokens = max_tokens
+        self._client = OpenAI(api_key=api_key, base_url=base_url or None)
+
+    @staticmethod
+    def _to_openai_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """把 Anthropic 风格 ``TOOLS_SCHEMA`` 转为 OpenAI ``tools`` 格式。"""
+        converted: list[dict[str, Any]] = []
+        for tool in tools:
+            converted.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get(
+                            "input_schema", {"type": "object", "properties": {}}
+                        ),
+                    },
+                }
+            )
+        return converted
+
+    def _call(self, prompt: str, *, system: str = _SYSTEM_PROMPT) -> str:
+        """同步调用 ``chat.completions`` 并返回首条消息文本。"""
+        response = self._client.chat.completions.create(
+            model=self.model,
+            max_tokens=self._max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return response.choices[0].message.content or ""
+
+    def parse_query(self, query: str, available_filters: list[str]) -> ParsedQuery:
+        """把自然语言解析为结构化检索参数，强制 JSON 输出。"""
+        prompt = (
+            f"available_filters = {available_filters}\n"
+            f"用户问题: {query}\n"
+            '请仅返回 JSON，例如 {"cell_id": null, "filters": {"cell_type": "hepatocyte"}, '
+            '"top_k": 10, "intent": "..."}'
+        )
+        try:
+            return _coerce_parsed(
+                _safe_json_loads(self._call(prompt)),
+                available_filters,
+                default_top_k=10,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OpenAI parse_query 失败，回退 mock: %s", exc)
+            return MockLLMClient().parse_query(query, available_filters)
+
+    def summarize(self, query: str, hits: list[dict[str, Any]]) -> str:
+        """基于命中 JSON 用中文生成 3-5 句总结。"""
+        digest = json.dumps(hits[:10], ensure_ascii=False, default=str)
+        prompt = (
+            f"用户原始问题: {query}\n"
+            f"以下是相似细胞检索结果（JSON，至多 10 条）:\n{digest}\n"
+            "请用中文给出 3-5 句总结，包含命中数量、主要细胞类型、组织/疾病分布与代表 cell_id。"
+        )
+        try:
+            return self._call(
+                prompt,
+                system="你是一个生物信息助手，用简洁中文回答用户问题。",
+            ).strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OpenAI summarize 失败，回退 mock: %s", exc)
+            return MockLLMClient().summarize(query, hits)
+
+    def chat_with_tools(
+        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+    ) -> ChatResponse:
+        """走 OpenAI 原生 function calling 协议。
+
+        ``messages`` 已是 OpenAI 风格（含 ``tool_calls`` / ``role='tool'``），
+        直接转发；解析 ``message.tool_calls`` 转 :class:`ToolCall`，无工具调用
+        时把 ``message.content`` 作为最终答案返回。
+        """
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                max_tokens=self._max_tokens,
+                messages=messages,
+                tools=self._to_openai_tools(tools),
+                tool_choice="auto",
+            )
+            message = response.choices[0].message
+            raw_tool_calls = getattr(message, "tool_calls", None) or []
+            tool_calls: list[ToolCall] = []
+            for tc in raw_tool_calls:
+                fn = tc.function
+                arguments = fn.arguments
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {}
+                tool_calls.append(
+                    ToolCall(
+                        id=tc.id or f"call_{uuid.uuid4().hex[:8]}",
+                        name=fn.name,
+                        arguments=dict(arguments or {}),
+                    )
+                )
+            if tool_calls:
+                return ChatResponse(
+                    finish_reason="tool_calls",
+                    tool_calls=tool_calls,
+                    content=message.content or "",
+                )
+            return ChatResponse(finish_reason="stop", content=message.content or "")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OpenAI chat_with_tools 失败，回退 mock: %s", exc)
+            return MockLLMClient().chat_with_tools(messages, tools)
+
+
 def get_llm_client() -> LLMClient:
     """根据 :data:`settings.LLM_PROVIDER` 返回对应的 LLM 客户端实例。
 
@@ -719,6 +937,12 @@ def get_llm_client() -> LLMClient:
             api_key = settings.ANTHROPIC_API_KEY or settings.LLM_API_KEY
             model = settings.LLM_MODEL or "claude-opus-4-7"
             return AnthropicClient(model=model, api_key=api_key)
+        if provider == "openai":
+            return OpenAICompatibleClient(
+                model=settings.LLM_MODEL or "gpt-4o-mini",
+                api_key=settings.LLM_API_KEY,
+                base_url=settings.LLM_BASE_URL or None,
+            )
     except Exception as exc:  # noqa: BLE001
         logger.warning("初始化 LLM 客户端失败（provider=%s），回退 mock: %s", provider, exc)
     return MockLLMClient()

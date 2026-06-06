@@ -203,6 +203,29 @@ def _build_response(
     )
 
 
+@router.get(
+    "/cell-ids",
+    response_model=list[str],
+    summary="cell_id 自动补全建议",
+    description=(
+        "按已输入片段返回数据集内匹配的 ``cell_id`` 候选，供检索表单输入框自动补全。"
+        " 前缀命中优先于子串命中，大小写不敏感；``q`` 为空时返回前若干个作为默认候选。"
+    ),
+)
+async def suggest_cell_ids(
+    db: DbSession,
+    current_user: CurrentUser,
+    dataset_id: int,
+    q: str = "",
+    limit: int = 20,
+) -> list[str]:
+    """返回 cell_id 自动补全候选。"""
+    dataset = await _get_dataset(db, dataset_id)
+    dataset_dir = _resolve_dataset_dir(dataset)
+    capped = max(1, min(limit, 50))
+    return await asyncio.to_thread(search_service.suggest_cell_ids, dataset_dir, q, capped)
+
+
 @router.post(
     "/by-id",
     response_model=SearchResponse,

@@ -24,8 +24,11 @@ class Settings(BaseSettings):
         DATA_DIR: 数据根目录。
         INDEX_DIR: 索引文件目录。
         PROCESSED_DIR: 预处理后数据目录。
-        LLM_PROVIDER: 大模型提供方，取值 ``mock|anthropic``，默认 ``mock``。
-        LLM_MODEL: 大模型名称，例如 ``claude-opus-4-7``（Anthropic 最新 GA flagship）。
+        LLM_PROVIDER: 大模型提供方，取值 ``mock|anthropic|openai``，默认 ``mock``。
+            ``openai`` 走 OpenAI Chat Completions 兼容协议，可对接 OpenAI、
+            Gemini（``https://generativelanguage.googleapis.com/v1beta/openai/``）等。
+        LLM_MODEL: 大模型名称，例如 ``gemini-2.5-flash`` / ``gpt-4o-mini`` / ``claude-opus-4-7``。
+        LLM_BASE_URL: OpenAI 兼容端点 base_url；为空时用 SDK 默认（OpenAI 官方）。
         LLM_API_KEY: 大模型 API Key（anthropic provider 在 ``ANTHROPIC_API_KEY`` 缺省时退回此值）。
         ANTHROPIC_API_KEY: Anthropic 专用 API Key，配置时优先覆盖 ``LLM_API_KEY``。
         CORS_ORIGINS: 允许的跨域来源列表。
@@ -53,8 +56,9 @@ class Settings(BaseSettings):
     INDEX_DIR: str = "./data/indexes"
     PROCESSED_DIR: str = "./data/processed"
 
-    LLM_PROVIDER: Literal["mock", "anthropic"] = "mock"
+    LLM_PROVIDER: Literal["mock", "anthropic", "openai"] = "mock"
     LLM_MODEL: str = "claude-opus-4-7"
+    LLM_BASE_URL: str = ""
     LLM_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
 

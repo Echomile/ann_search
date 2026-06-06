@@ -15,6 +15,8 @@ services:
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
       WATCHFILES_FORCE_POLLING: "true"
+      # 本地 5173 被宿主进程占用，前端改用 5273，这里同步放行其跨域来源。
+      CORS_ORIGINS: http://localhost:5273,http://localhost:5173
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
 
   worker:
@@ -39,7 +41,10 @@ services:
       - /app/node_modules
     environment:
       VITE_API_BASE_URL: http://localhost:8000
+      # 容器内 Vite 代理 /api 的目标：用服务名而非 localhost（后者指向 frontend 容器自身）。
+      VITE_PROXY_TARGET: http://backend:8000
       CHOKIDAR_USEPOLLING: "true"
     ports:
-      - "5173:5173"
+      # 宿主 5173 被占用，改用 5273 映射到容器内 Vite 的 5173。访问 http://localhost:5273
+      - "5273:5173"
     command: npm run dev -- --host 0.0.0.0 --port 5173

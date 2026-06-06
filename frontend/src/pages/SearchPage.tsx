@@ -25,6 +25,7 @@ import { alignmentApi, datasetsApi } from '@/api/datasets';
 import { indexesApi } from '@/api/indexes';
 import { searchApi } from '@/api/search';
 import type { StreamDoneEvent } from '@/api/search';
+import { CellIdAutoComplete } from '@/components/CellIdAutoComplete';
 import type { Dataset } from '@/types/dataset';
 import type { AlignedDataset } from '@/types/aligned';
 import type { IndexRecord } from '@/types/indexRecord';
@@ -160,6 +161,8 @@ const SearchPage = () => {
   const watchedDatasetIdV = Form.useWatch('dataset_id', byVectorForm);
   const watchedDatasetIdS = Form.useWatch('dataset_id', streamForm);
   const watchedDatasetIdE = Form.useWatch('dataset_id', ensembleForm);
+  // multi-dataset 的 cell_id 归属于源数据集，补全用 source_dataset_id
+  const watchedSourceDatasetIdM = Form.useWatch('source_dataset_id', multiForm);
 
   const loadDatasets = useCallback(async () => {
     try {
@@ -581,7 +584,10 @@ const SearchPage = () => {
             </Col>
           </Row>
           <Form.Item label="查询细胞 ID" name="cell_id" rules={[{ required: true }]}>
-            <Input placeholder="例如 AAACATACAACCAC-1" />
+            <CellIdAutoComplete
+              datasetId={watchedDatasetId}
+              placeholder="输入片段自动补全，例如 AAACCTGAGCAGGTCA-1_2"
+            />
           </Form.Item>
           <Form.Item label="过滤器（可选）">{renderFilterList('byId')}</Form.Item>
           <Button type="primary" htmlType="submit" loading={submitting} icon={<SearchOutlined />}>
@@ -715,7 +721,10 @@ const SearchPage = () => {
             </Col>
           </Row>
           <Form.Item label="查询细胞 ID" name="cell_id" rules={[{ required: true }]}>
-            <Input placeholder="该 cell_id 须存在于所选源数据集中" />
+            <CellIdAutoComplete
+              datasetId={watchedSourceDatasetIdM}
+              placeholder="输入片段自动补全，须存在于所选源数据集中"
+            />
           </Form.Item>
           <Form.Item label="过滤器（可选）">{renderFilterList('multi')}</Form.Item>
           <Button type="primary" htmlType="submit" loading={submitting} icon={<SearchOutlined />}>
@@ -877,7 +886,10 @@ const SearchPage = () => {
                 label="查询细胞 ID（与查询向量二选一，cell_id 优先）"
                 name="cell_id"
               >
-                <Input placeholder="例如 AAACATACAACCAC-1" allowClear />
+                <CellIdAutoComplete
+                  datasetId={watchedDatasetIdE}
+                  placeholder="输入片段自动补全，与向量二选一"
+                />
               </Form.Item>
             </Col>
             <Col xs={24} md={12}>

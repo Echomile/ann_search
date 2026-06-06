@@ -78,6 +78,56 @@ def load_dataset_artifacts(dataset_dir: str) -> dict[str, Any]:
     }
 
 
+@lru_cache(maxsize=32)
+def _load_cell_ids(dataset_dir: str) -> tuple[str, ...]:
+    """仅加载 ``cell_ids.json``（不触碰向量矩阵），供自动补全等轻量场景使用。
+
+    Args:
+        dataset_dir: 数据集制品目录。
+
+    Returns:
+        tuple[str, ...]: 全量 cell_id，按原始行序排列；文件缺失时返回空元组。
+    """
+    path = os.path.join(dataset_dir, "cell_ids.json")
+    if not os.path.isfile(path):
+        return ()
+    with open(path, encoding="utf-8") as fp:
+        return tuple(str(c) for c in json.load(fp))
+
+
+def suggest_cell_ids(dataset_dir: str, query: str, limit: int = 20) -> list[str]:
+    """按输入前缀/子串返回 cell_id 候选，用于前端输入框自动补全。
+
+    匹配优先级：前缀命中优先于子串命中，二者均保持原始行序；大小写不敏感。
+    ``query`` 为空时直接返回前 ``limit`` 个 cell_id 作为默认候选。
+
+    Args:
+        dataset_dir: 数据集制品目录。
+        query: 用户已输入的片段。
+        limit: 返回候选上限。
+
+    Returns:
+        list[str]: 去重后的候选 cell_id 列表，长度不超过 ``limit``。
+    """
+    ids = _load_cell_ids(dataset_dir)
+    if not ids:
+        return []
+    if not query:
+        return list(ids[:limit])
+    q = query.lower()
+    prefix: list[str] = []
+    contains: list[str] = []
+    for cid in ids:
+        low = cid.lower()
+        if low.startswith(q):
+            prefix.append(cid)
+            if len(prefix) >= limit:
+                return prefix[:limit]
+        elif q in low and len(contains) < limit:
+            contains.append(cid)
+    return (prefix + contains)[:limit]
+
+
 def _load_metadata(dataset_dir: str, expected_rows: int) -> pd.DataFrame:
     """从数据集目录加载 ``metadata.parquet`` 或 ``metadata.csv``。
 

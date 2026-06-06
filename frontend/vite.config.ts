@@ -3,8 +3,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
-// Vite 配置：开发端口 5173，将 /api 代理到后端 8000，配置 @ 别名指向 src
+// Vite 配置：开发端口 5173，将 /api 代理到后端，配置 @ 别名指向 src
 // 构建产物按 plotly / antd / vendor 三个 vendor chunk 拆分，降低首屏体积
+//
+// 代理目标可由 VITE_PROXY_TARGET 覆盖：本地原生开发默认 localhost:8000；
+// 容器内开发须由 docker-compose.dev.yml 注入 http://backend:8000（容器内 localhost 指向自身）。
+const proxyTarget = process.env.VITE_PROXY_TARGET ?? 'http://localhost:8000';
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -17,7 +22,7 @@ export default defineConfig({
     host: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true,
       },
     },
