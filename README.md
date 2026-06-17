@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/PostgreSQL-17-336791?logo=postgresql&logoColor=white" alt="PostgreSQL"/>
   <img src="https://img.shields.io/badge/Redis-7-dc382d?logo=redis&logoColor=white" alt="Redis"/>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License"/>
+  <a href="https://github.com/Echomile/ann_search"><img src="https://img.shields.io/badge/GitHub-Echomile%2Fann__search-181717?logo=github&logoColor=white" alt="GitHub"/></a>
 </p>
 
 <p align="center">
@@ -37,6 +38,8 @@
   <a href="submission/MANIFEST.md">提交物清单</a>
   &nbsp;·&nbsp;
   <a href="docs/00_课程需求.md">课程需求</a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/Echomile/ann_search">GitHub 仓库</a>
 </p>
 
 ## 项目简介
